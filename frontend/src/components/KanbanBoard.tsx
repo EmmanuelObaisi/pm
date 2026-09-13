@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -38,6 +38,8 @@ export const KanbanBoard = () => {
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [boardError, setBoardError] = useState("");
+  const skipNextSaveRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -55,9 +57,17 @@ export const KanbanBoard = () => {
     let ignore = false;
 
     const loadBoard = async () => {
-      const nextBoard = await fetchBoard(username);
-      if (!ignore) {
-        setBoard(nextBoard);
+      try {
+        const nextBoard = await fetchBoard(username);
+        if (!ignore) {
+          skipNextSaveRef.current = true;
+          setBoard(nextBoard);
+          setBoardError("");
+        }
+      } catch {
+        if (!ignore) {
+          setBoardError("Could not load your board. Showing local data instead.");
+        }
       }
     };
 
@@ -73,8 +83,15 @@ export const KanbanBoard = () => {
       return;
     }
 
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+
     const timeout = window.setTimeout(() => {
-      void saveBoard(username, board);
+      saveBoard(username, board)
+        .then(() => setBoardError(""))
+        .catch(() => setBoardError("Could not save your changes. Retrying on the next edit."));
     }, 150);
 
     return () => window.clearTimeout(timeout);
@@ -105,6 +122,7 @@ export const KanbanBoard = () => {
       },
     ]);
     setAiError("");
+    setBoardError("");
   };
 
   const handleAskAI = async (event: FormEvent<HTMLFormElement>) => {
@@ -351,6 +369,12 @@ export const KanbanBoard = () => {
             ))}
           </div>
         </header>
+
+        {boardError ? (
+          <p className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-600">
+            {boardError}
+          </p>
+        ) : null}
 
         <div className="flex flex-col gap-6 xl:flex-row">
           <div className="min-w-0 flex-1">

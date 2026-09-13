@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 const initialFormState = { title: "", details: "" };
 
@@ -9,6 +9,7 @@ type NewCardFormProps = {
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
+  const formId = useId();
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -24,7 +25,11 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
     <div className="mt-4">
       {isOpen ? (
         <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="sr-only" htmlFor={`${formId}-title`}>
+            Card title
+          </label>
           <input
+            id={`${formId}-title`}
             value={formState.title}
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, title: event.target.value }))
@@ -33,7 +38,11 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             className="w-full rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
             required
           />
+          <label className="sr-only" htmlFor={`${formId}-details`}>
+            Card details
+          </label>
           <textarea
+            id={`${formId}-details`}
             value={formState.details}
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, details: event.target.value }))
