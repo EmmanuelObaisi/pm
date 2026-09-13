@@ -23,11 +23,26 @@ test("adds a card to a column after sign in", async ({ page }) => {
   await expect(firstColumn.getByText("Playwright card")).toBeVisible();
 });
 
+test("edits a card title and details after sign in", async ({ page }) => {
+  await signIn(page);
+  const card = page.getByTestId("card-card-1");
+  await card.getByRole("button", { name: /edit align roadmap themes/i }).click();
+  const title = card.getByRole("textbox", { name: "Card title" });
+  const details = card.getByRole("textbox", { name: "Card details" });
+
+  await title.fill("Updated in browser");
+  await details.fill("Details updated in browser.");
+
+  await expect(title).toHaveValue("Updated in browser");
+  await expect(details).toHaveValue("Details updated in browser.");
+});
+
 test("moves a card between columns after sign in", async ({ page }) => {
   await signIn(page);
   const card = page.getByTestId("card-card-1");
   const targetColumn = page.getByTestId("column-col-review");
-  const cardBox = await card.boundingBox();
+  const moveButton = card.getByRole("button", { name: /^Move / });
+  const cardBox = await moveButton.boundingBox();
   const columnBox = await targetColumn.boundingBox();
   if (!cardBox || !columnBox) {
     throw new Error("Unable to resolve drag coordinates.");

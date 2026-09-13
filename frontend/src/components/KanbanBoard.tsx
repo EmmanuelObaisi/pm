@@ -193,6 +193,20 @@ export const KanbanBoard = () => {
     }));
   };
 
+  const handleEditCard = (
+    cardId: string,
+    field: "title" | "details",
+    value: string
+  ) => {
+    setBoard((prev) => ({
+      ...prev,
+      cards: {
+        ...prev.cards,
+        [cardId]: { ...prev.cards[cardId], [field]: value },
+      },
+    }));
+  };
+
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
     setBoard((prev) => ({
@@ -353,6 +367,7 @@ export const KanbanBoard = () => {
                     column={column}
                     cards={column.cardIds.map((cardId) => board.cards[cardId])}
                     onRename={handleRenameColumn}
+                    onEditCard={handleEditCard}
                     onAddCard={handleAddCard}
                     onDeleteCard={handleDeleteCard}
                   />

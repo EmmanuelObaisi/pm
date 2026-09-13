@@ -74,6 +74,39 @@ describe("KanbanBoard", () => {
     });
   });
 
+  it("allows card titles and details to be edited", async () => {
+    render(<KanbanBoard />);
+
+    await userEvent.type(screen.getByLabelText(/username/i), "user");
+    await userEvent.type(screen.getByLabelText(/password/i), "password");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(within(card).getByRole("button", { name: /edit board from api/i }));
+    const titleInput = within(card).getByRole("textbox", { name: "Card title" });
+    const detailsInput = within(card).getByRole("textbox", { name: "Card details" });
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Updated card");
+    await userEvent.clear(detailsInput);
+    await userEvent.type(detailsInput, "Updated details");
+
+    expect(screen.getByDisplayValue("Updated card")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Updated details")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockedSaveBoard).toHaveBeenCalledWith(
+        "user",
+        expect.objectContaining({
+          cards: expect.objectContaining({
+            "card-1": expect.objectContaining({
+              title: "Updated card",
+              details: "Updated details",
+            }),
+          }),
+        })
+      );
+    });
+  });
+
   it("sends the board to the AI assistant and applies board updates", async () => {
     mockedAskAI.mockResolvedValue({
       reply: "Added a card to the review column.",
