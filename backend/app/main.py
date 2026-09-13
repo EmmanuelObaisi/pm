@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +68,6 @@ DEFAULT_BOARD: dict[str, Any] = {
 }
 
 app = FastAPI(title="Project Management MVP Backend")
-
-
-class AIRequestPayload(dict):
-    pass
 
 
 def get_openrouter_api_key() -> str:
@@ -185,9 +182,9 @@ def call_openrouter(
             detail=f"OpenRouter call failed ({response.status_code}): {response.text}",
         )
 
-    payload = response.json()
+    response_body = response.json()
     try:
-        return payload["choices"][0]["message"]["content"]
+        return response_body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
         raise HTTPException(status_code=502, detail="OpenRouter returned an unexpected response.") from error
 
@@ -199,7 +196,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -222,7 +219,7 @@ def init_db() -> None:
 
 
 def ensure_user(username: str) -> int:
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         existing = connection.execute(
             "SELECT id FROM users WHERE username = ?",
             (username,),
@@ -247,7 +244,7 @@ def get_board_for_user(username: str) -> dict[str, Any]:
     init_db()
     user_id = ensure_user(username)
 
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         row = connection.execute(
             "SELECT board_json FROM boards WHERE user_id = ?",
             (user_id,),
@@ -270,7 +267,7 @@ def save_board_for_user(username: str, board: dict[str, Any]) -> dict[str, Any]:
     user_id = ensure_user(username)
     payload = json.loads(json.dumps(board))
 
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         connection.execute(
             """
             INSERT INTO boards (user_id, board_json)
@@ -330,6 +327,8 @@ async def ai_board(payload: dict[str, Any]) -> dict[str, Any]:
         },
     ]
     for entry in history:
+        if not isinstance(entry, dict):
+            continue
         role = entry.get("role")
         content = entry.get("content")
         if role in ("user", "assistant") and content:
