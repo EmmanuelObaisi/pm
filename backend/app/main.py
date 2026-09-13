@@ -7,10 +7,12 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = (BASE_DIR.parent / "project_management.db").resolve()
 FRONTEND_DIST = (BASE_DIR / ".." / ".." / "frontend" / "out").resolve()
+load_dotenv((BASE_DIR.parent.parent / ".env").resolve())
 
 DEFAULT_BOARD: dict[str, Any] = {
     "columns": [
@@ -80,26 +82,35 @@ def get_openrouter_api_key() -> str:
 
 def call_openrouter(prompt: str) -> str:
     api_key = get_openrouter_api_key()
-    response = httpx.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost",
-            "X-Title": "Project Management MVP",
-        },
-        json={
-            "model": "openai/gpt-oss-120b",
-            "messages": [{"role": "user", "content": prompt}],
-        },
-        timeout=30,
-    )
+    try:
+        response = httpx.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost",
+                "X-Title": "Project Management MVP",
+            },
+            json={
+                "model": "openai/gpt-oss-120b",
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail=f"OpenRouter request failed: {error}") from error
 
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"OpenRouter call failed: {response.text}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenRouter call failed ({response.status_code}): {response.text}",
+        )
 
     payload = response.json()
-    return payload["choices"][0]["message"]["content"]
+    try:
+        return payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as error:
+        raise HTTPException(status_code=502, detail="OpenRouter returned an unexpected response.") from error
 
 
 def get_connection() -> sqlite3.Connection:

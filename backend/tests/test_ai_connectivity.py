@@ -35,3 +35,37 @@ def test_ai_test_endpoint_requires_api_key(monkeypatch) -> None:
 
     assert response.status_code == 500
     assert "OPENROUTER_API_KEY" in response.json()["detail"]
+
+
+def test_ai_board_applies_a_board_update(monkeypatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.main.httpx.post",
+        lambda *args, **kwargs: type(
+            "FakeResponse",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda self: {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"reply":"Moved the card.","board_update":{"columns":[],"cards":{}}}'
+                            }
+                        }
+                    ]
+                },
+            },
+        )(),
+    )
+
+    response = client.post(
+        "/api/ai/board",
+        json={"user": "ai-test-user", "question": "Move a card", "board": {"columns": [], "cards": []}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reply": "Moved the card.",
+        "board_update": {"columns": [], "cards": {}},
+    }
