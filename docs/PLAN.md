@@ -12,9 +12,8 @@ codebase as of 2026-09-13 and is awaiting the user's review and approval.
 ## Part 1: Plan
 
 - [x] Write this phased plan with substeps, tests, and success criteria.
-- [x] Create `frontend/AGENTS.md` describing the existing frontend code
-      (placeholder only, per root `AGENTS.md`).
-- [x] Get user sign-off on the plan.
+- [x] Create `frontend/AGENTS.md` describing the existing frontend code.
+- [ ] Get user sign-off on the plan.
 
 Success criteria: user has reviewed and approved this document before further
 implementation work proceeds.
