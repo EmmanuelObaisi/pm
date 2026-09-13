@@ -34,6 +34,12 @@ Tests: `backend/tests/test_main.py` hits `/api/hello` and `/health` via
 Success criteria: `docker compose up --build` serves a working hello-world
 API; the scripts start and stop the backend without manual intervention.
 
+Verified live (2026-09-13): `docker compose build && docker compose up -d`
+built and ran the full image (frontend static export + backend). Smoke
+tested `/health`, `/api/hello`, `/`, `/api/board`, `/api/ai/test`, and
+`/api/ai/board` (the last two against the real OpenRouter API) — all
+returned correct responses, then `docker compose down` cleaned up.
+
 ## Part 3: Add in Frontend
 
 - [x] NextJS app configured for static export (`next.config` → `frontend/out`),
@@ -186,10 +192,8 @@ app updates the Kanban UI without a manual refresh.
 - No merge logic if the AI's `board_update` conflicts with concurrent local
   edits — acceptable for the MVP's single-user-at-a-time constraint, but
   worth flagging if multi-user support is ever added.
-- `openai/gpt-oss-120b`'s actual level of support for `strict` structured
-  outputs via OpenRouter is confirmed only from OpenRouter's docs (the model
-  accepts a `response_format` parameter); it hasn't been exercised against a
-  real OpenRouter call with a live API key in this environment. Run
-  `/api/ai/board` for real once `OPENROUTER_API_KEY` is set, to confirm the
-  provider actually enforces the schema rather than merely accepting the
-  parameter.
+- Verified live: `openai/gpt-oss-120b` via OpenRouter honors the strict
+  `json_schema` `response_format` — confirmed by running the built Docker
+  image end-to-end (`POST /api/ai/board` against the real API) and getting
+  back a schema-conformant `{reply, board_update}` with the requested card
+  actually added.
