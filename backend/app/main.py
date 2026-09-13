@@ -80,8 +80,90 @@ def get_openrouter_api_key() -> str:
     return api_key
 
 
-def call_openrouter(prompt: str) -> str:
+BOARD_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "board_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "reply": {"type": "string"},
+                "board_update": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "columns": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "title": {"type": "string"},
+                                            "cardIds": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        },
+                                        "required": ["id", "title", "cardIds"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "cards": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "title": {"type": "string"},
+                                            "details": {"type": "string"},
+                                        },
+                                        "required": ["id", "title", "details"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["columns", "cards"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                },
+            },
+            "required": ["reply", "board_update"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def board_to_ai_shape(board: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "columns": board.get("columns", []),
+        "cards": list(board.get("cards", {}).values()),
+    }
+
+
+def ai_shape_to_board(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "columns": data.get("columns", []),
+        "cards": {card["id"]: card for card in data.get("cards", [])},
+    }
+
+
+def call_openrouter(
+    messages: list[dict[str, str]],
+    response_format: dict[str, Any] | None = None,
+) -> str:
     api_key = get_openrouter_api_key()
+    payload: dict[str, Any] = {
+        "model": "openai/gpt-oss-120b",
+        "messages": messages,
+    }
+    if response_format is not None:
+        payload["response_format"] = response_format
+
     try:
         response = httpx.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -91,10 +173,7 @@ def call_openrouter(prompt: str) -> str:
                 "HTTP-Referer": "http://localhost",
                 "X-Title": "Project Management MVP",
             },
-            json={
-                "model": "openai/gpt-oss-120b",
-                "messages": [{"role": "user", "content": prompt}],
-            },
+            json=payload,
             timeout=30,
         )
     except httpx.HTTPError as error:
@@ -223,8 +302,17 @@ async def put_board(user: str, board: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/ai/test")
 async def ai_test(payload: dict[str, str]) -> dict[str, str]:
     prompt = payload.get("prompt", "")
-    answer = call_openrouter(prompt)
+    answer = call_openrouter([{"role": "user", "content": prompt}])
     return {"answer": answer.strip()}
+
+
+AI_BOARD_SYSTEM_PROMPT = (
+    "You are a project management assistant with full read/write access to the "
+    "user's Kanban board. Reply to the user's question, and if their request "
+    "requires changing the board, set board_update to the complete new board "
+    "state (all columns and all cards, not just the changed ones). Leave "
+    "board_update null when no change is needed."
+)
 
 
 @app.post("/api/ai/board")
@@ -234,34 +322,32 @@ async def ai_board(payload: dict[str, Any]) -> dict[str, Any]:
     history = payload.get("history", [])
     board = payload.get("board") or get_board_for_user(user)
 
-    prompt = json.dumps(
+    board_context = json.dumps(board_to_ai_shape(board))
+    messages = [
         {
-            "user": user,
-            "question": question,
-            "conversation_history": history,
-            "kanban_board": board,
-            "response_format": {
-                "reply": "string",
-                "board_update": {
-                    "type": "object",
-                    "nullable": True,
-                    "description": "Optional updated kanban board JSON"
-                }
-            },
+            "role": "system",
+            "content": f"{AI_BOARD_SYSTEM_PROMPT}\n\nCurrent board:\n{board_context}",
         },
-        indent=2,
-    )
+    ]
+    for entry in history:
+        role = entry.get("role")
+        content = entry.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": question})
 
-    content = call_openrouter(prompt)
+    content = call_openrouter(messages, response_format=BOARD_RESPONSE_FORMAT)
     try:
         parsed = json.loads(content)
-    except json.JSONDecodeError:
-        parsed = {"reply": content, "board_update": None}
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail="AI response was not valid JSON.") from error
 
-    if parsed.get("board_update"):
-        save_board_for_user(user, parsed["board_update"])
+    board_update = parsed.get("board_update")
+    if board_update:
+        board_update = ai_shape_to_board(board_update)
+        save_board_for_user(user, board_update)
 
-    return parsed
+    return {"reply": parsed.get("reply", ""), "board_update": board_update}
 
 
 @app.get("/health")

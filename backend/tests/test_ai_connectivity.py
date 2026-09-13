@@ -39,9 +39,11 @@ def test_ai_test_endpoint_requires_api_key(monkeypatch) -> None:
 
 def test_ai_board_applies_a_board_update(monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "app.main.httpx.post",
-        lambda *args, **kwargs: type(
+    captured: dict = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return type(
             "FakeResponse",
             (),
             {
@@ -50,18 +52,22 @@ def test_ai_board_applies_a_board_update(monkeypatch) -> None:
                     "choices": [
                         {
                             "message": {
-                                "content": '{"reply":"Moved the card.","board_update":{"columns":[],"cards":{}}}'
+                                "content": (
+                                    '{"reply":"Moved the card.",'
+                                    '"board_update":{"columns":[],"cards":[]}}'
+                                )
                             }
                         }
                     ]
                 },
             },
-        )(),
-    )
+        )()
+
+    monkeypatch.setattr("app.main.httpx.post", fake_post)
 
     response = client.post(
         "/api/ai/board",
-        json={"user": "ai-test-user", "question": "Move a card", "board": {"columns": [], "cards": []}},
+        json={"user": "ai-test-user", "question": "Move a card", "board": {"columns": [], "cards": {}}},
     )
 
     assert response.status_code == 200
@@ -69,3 +75,29 @@ def test_ai_board_applies_a_board_update(monkeypatch) -> None:
         "reply": "Moved the card.",
         "board_update": {"columns": [], "cards": {}},
     }
+    assert captured["payload"]["response_format"]["type"] == "json_schema"
+    assert captured["payload"]["response_format"]["json_schema"]["strict"] is True
+
+
+def test_ai_board_rejects_non_json_response(monkeypatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.main.httpx.post",
+        lambda *args, **kwargs: type(
+            "FakeResponse",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda self: {
+                    "choices": [{"message": {"content": "not json"}}]
+                },
+            },
+        )(),
+    )
+
+    response = client.post(
+        "/api/ai/board",
+        json={"user": "ai-test-user", "question": "Move a card", "board": {"columns": [], "cards": {}}},
+    )
+
+    assert response.status_code == 502
