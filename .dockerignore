@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+*.db
+backend/.pytest_cache
+
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/test-results
+frontend/playwright-report
+frontend/coverage

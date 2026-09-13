@@ -12,8 +12,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+RUN pip install --no-cache-dir uv
+
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY backend ./backend
 COPY --from=frontend-build /app/frontend/out /app/frontend/out
