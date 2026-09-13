@@ -7,6 +7,13 @@ correctly — see `docs/PLAN.md` for that verification. This review looks past
 "does it pass" to correctness, consistency with the project's own stated
 requirements, and hygiene issues that will bite later.
 
+**Status: all 14 findings below were fixed and re-verified on 2026-09-13** —
+backend pytest (10/10), frontend vitest (8/8), frontend Playwright (4/4),
+and a full Docker rebuild-from-scratch + live smoke test against the real
+OpenRouter API all pass. The `ResourceWarning` that evidenced finding #1 is
+gone from the pytest output, and the `.dockerignore` fix was verified to
+cut the frontend build stage's context transfer from ~500MB to 63KB.
+
 Findings are ordered by severity within each section. Each one names the
 exact location and the evidence for the claim — no guessed root causes.
 
