@@ -6,7 +6,10 @@ Next static export at `/`.
 ## Layout
 
 - `app/config.py` — settings read from the root `.env`: JWT secret and TTL,
-  PBKDF2 rounds, OpenRouter URL and model, the frontend export path.
+  PBKDF2 rounds, OpenRouter URL and model, the frontend export path. It also
+  calls `truststore.inject_into_ssl()`, so TLS is verified against the OS
+  certificate store; without it, HTTPS-inspecting antivirus or proxies break
+  OpenRouter calls, because their root is not in certifi's bundle.
 - `app/db.py` — the schema, the `connect()` transaction helper, and
   `migrate_legacy_schema`, which upgrades an MVP database (one
   `boards.board_json` blob per user) in place on first open. `DB_PATH` can be

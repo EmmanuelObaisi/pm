@@ -1,7 +1,15 @@
 import os
 from pathlib import Path
 
+import truststore
 from dotenv import load_dotenv
+
+# Verify TLS against the operating system's trust store instead of certifi's
+# bundle. Antivirus and corporate proxies that inspect HTTPS re-sign traffic
+# with a root they install in the OS store only, so certifi-based verification
+# fails on OpenRouter with CERTIFICATE_VERIFY_FAILED. Verification stays on;
+# this only changes where the trusted roots come from.
+truststore.inject_into_ssl()
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv((BASE_DIR.parent.parent / ".env").resolve())
