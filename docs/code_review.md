@@ -1,244 +1,199 @@
-# Code review
+# Project code review
 
-Full-repo review of the Project Management MVP (backend, frontend, Docker,
-scripts, docs) as of 2026-09-13. All test suites (backend pytest, frontend
-vitest, frontend Playwright) pass, and the Docker image builds and runs
-correctly — see `docs/PLAN.md` for that verification. This review looks past
-"does it pass" to correctness, consistency with the project's own stated
-requirements, and hygiene issues that will bite later.
+Review date: 14 September 2026. Scope: the current working tree, not only the latest commit.
 
-**Status: all 14 findings below were fixed and re-verified on 2026-09-13** —
-backend pytest (10/10), frontend vitest (8/8), frontend Playwright (4/4),
-and a full Docker rebuild-from-scratch + live smoke test against the real
-OpenRouter API all pass. The `ResourceWarning` that evidenced finding #1 is
-gone from the pytest output, and the `.dockerignore` fix was verified to
-cut the frontend build stage's context transfer from ~500MB to 63KB.
+## Assessment
 
-Findings are ordered by severity within each section. Each one names the
-exact location and the evidence for the claim — no guessed root causes.
+The project has a small, understandable MVP architecture and passing happy-path tests. However, it should not yet be trusted with important board data: initial loading, AI updates, and container recreation can lose work. Backend validation and local network exposure also need attention.
 
-## High priority
+This review covers first-party frontend and backend code, tests, database storage, AI integration, Docker packaging, platform scripts, dependency configuration, and project documentation. Generated assets and third-party dependency implementations were not audited. No application fixes were made. The previously deleted `docs/code_review.md` was recreated as requested; temporary review probes were removed.
 
-### 1. SQLite connections are never closed (resource leak)
+The plan explicitly accepts demo-only client-side sign-in, a single board per user, SQLite, and no multi-user conflict merging. Those are not independently classified as defects here. Single-tab data loss and exposing unauthenticated APIs beyond the local machine are separate issues. Recommendations retain the MVP scope rather than proposing a production authentication system or a new database architecture.
 
-`backend/app/main.py:195-198` and every caller (`init_db`, `ensure_user`,
-`get_board_for_user`, `save_board_for_user`) does:
+Priorities: **P1 / high** means address before relying on the MVP with real data; **P2 / medium** means fix in the next reliability pass; **P3 / low** means maintenance or usability follow-up. Findings marked reproduced were exercised locally; static findings identify a code path but were not reproduced end-to-end.
 
-```python
-with get_connection() as connection:
-    ...
-```
+## P1 findings
 
-`sqlite3.Connection.__exit__` only commits or rolls back the transaction —
-it does **not** close the connection. Every board read/write leaks a
-connection handle. This isn't speculative: `pytest` prints
-`ResourceWarning: unclosed database in <sqlite3.Connection object ...>` on
-every run.
+### 1. Docker container recreation loses the SQLite database
 
-**Action**: wrap connections so they actually close, e.g.
-`with contextlib.closing(get_connection()) as connection:` or an explicit
-`try/finally: connection.close()`. Low risk today (single-user local app),
-but it's the kind of leak that turns into "database is locked" errors under
-any concurrent access.
+**Locations:** `docker-compose.yml:1-11`; `Dockerfile:20-26`; `backend/app/main.py:13-16`.
 
-### 2. Dockerfile doesn't use `uv`, contradicting the stated requirement
+The database lives at `/app/backend/project_management.db` inside the container, but Compose defines no persistent volume. Stopping and starting the same container retains data; removing/recreating it, including `docker compose down` followed by `up`, does not. A rebuild that recreates the container has the same risk.
 
-`Dockerfile:16` runs `RUN pip install --no-cache-dir -r requirements.txt`.
-Both `AGENTS.md` ("Use uv as the package manager for python in the Docker
-container") and `CLAUDE.md` ("Use uv as the Python package manager inside
-Docker... do not violate without asking") call for `uv` specifically. The
-image works today, but it's a direct, explicit deviation from a documented
-constraint that's flagged as needing sign-off before violating.
+**Evidence:** static inspection of the database path and complete Compose configuration. No existing container was removed during this review.
 
-**Action**: switch the backend stage to `uv pip install` (or `uv sync`), or
-get explicit sign-off to keep plain `pip` and update the docs to match
-reality instead.
+**Recommendation:** configure a dedicated database directory, such as `/data`, and mount a named volume there. Do not mount over the application source directory. Document the data location and backup procedure. Verify that a distinctive saved card survives container recreation with the same volume.
 
-### 3. Dev API proxy port doesn't match any documented way of running the backend
+### 2. Sign-in can overwrite saved work before the board finishes loading
 
-`frontend/next.config.ts:9-15` rewrites `/api/*` to
-`http://localhost:8002/api/:path*` — but every documented way to start the
-backend locally uses a different port:
+**Location:** `frontend/src/components/KanbanBoard.tsx:52-98`.
 
-- `scripts/start.{sh,ps1,bat}` all hardcode port `8000`.
-- `start-dev-combined.ps1` picks a free port starting at `8000`.
-- `CLAUDE.md`'s own "Common commands" section describes
-  `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`.
+Signing in starts both the GET and the autosave effect. After 150 ms, autosave sends the current local board, initially the demo data, even if the GET is still pending. The flag preventing a save is set only when the GET resolves. The UI can therefore show the previously saved board while the server has already been overwritten with demo data. If loading fails, saving the fallback board remains enabled.
 
-So running `npm run dev` (as `CLAUDE.md` documents) against a backend
-started with any of the documented scripts means every `/api/*` call
-silently fails. This isn't theoretical — I hit it directly this session and
-had to manually start the backend on port 8002 to get the Playwright suite
-to pass. `8002` appears nowhere else in the repo.
+**Evidence:** reproduced with a deferred `fetchBoard` promise and fake timers. Before resolving the GET, `saveBoard("user", initialData)` was called; after resolving it with distinct saved content, no corrective save occurred.
 
-**Action**: either standardize the backend dev port at 8000 everywhere
-(update `next.config.ts`) and document it, or make the rewrite target
-configurable via an env var the scripts also set.
+**Recommendation:** gate editing and autosave on successful initial loading. Keep a failed load in an explicit error/retry state rather than treating fallback data as a loaded board. Add delayed and rejected GET tests that assert no PUT occurs before successful loading.
 
-### 4. `frontend/AGENTS.md` was never created, and `docs/PLAN.md` claims it was
+### 3. Invalid API and AI boards are persisted and can break the UI
 
-The original `docs/PLAN.md` Part 1 required creating "an `AGENTS.md` file
-inside the frontend directory that describes the existing code there." That
-file does not exist (`backend/AGENTS.md` and `scripts/AGENTS.md` exist as
-one-line placeholders; there is no `frontend/AGENTS.md` at all). The
-enriched `docs/PLAN.md` written earlier this session incorrectly checks this
-off as done — that was a mistake in that edit, not a reflection of the
-codebase.
+**Locations:** `backend/app/main.py:138-149,294-296,315-349`; `frontend/src/components/KanbanBoard.tsx:361,388-392`; `frontend/src/components/KanbanColumn.tsx:53-59`.
 
-**Action**: create `frontend/AGENTS.md` (even a placeholder, matching the
-style of the other two) and correct the checkbox in `docs/PLAN.md`.
+The PUT endpoint accepts any JSON object. AI output is parsed but never validated locally against its structural or relational contract. The strict provider schema does not guarantee unique IDs, valid card references, or retention of the fixed columns. Converting the AI card array to a dictionary also silently collapses duplicate IDs.
 
-## Medium priority
+**Evidence:** reproduced against a disposable database:
 
-### 5. Runtime SQLite database is committed to git
+- `PUT /api/board?user=review` with `{}` returned 200, and GET returned `{}`. The frontend subsequently assumes `board.columns` exists.
+- A mocked AI response containing `cardIds: ["missing"]` and an empty card array returned 200 and was persisted. Rendering that column dereferences `undefined.id`.
+- The current provider schema permits empty columns and arbitrary replacement column IDs, despite the fixed-column requirement.
 
-`backend/project_management.db` is tracked in git and changes (binary diff)
-every time the app or its Docker image runs locally, per `CLAUDE.md`'s own
-note that it's "checked into the working tree state." This causes
-unreviewable binary churn in history and mixes runtime state with source.
-The code already supports lazy auto-creation
-(`get_board_for_user`/`save_board_for_user` create the DB and default board
-on first access), so nothing depends on the committed file's contents.
+**Recommendation:** use typed request/response models and one shared board validator at persistence boundaries. Validate required fields, unique IDs, dictionary key/ID agreement, card membership, and the fixed column identities while permitting renames. Reject invalid client input with 422 and invalid provider output with 502, leaving the saved board unchanged. Add tests using dangling references, duplicate IDs, and removed columns, not only empty-board fixtures.
 
-**Action**: add `backend/project_management.db` to `.gitignore`, `git rm
---cached` it, and let it be created on first run as the code already
-intends.
+### 4. An AI response overwrites edits made while it is pending
 
-### 6. Missing `.dockerignore`
+**Locations:** `frontend/src/components/KanbanBoard.tsx:128-171,379-407`; `backend/app/main.py:338-347`.
 
-There is no `.dockerignore` anywhere in the repo. `docker-compose.yml`'s
-build context is the repo root, which currently includes `frontend/node_modules`
-(501 MB on disk), the root `.venv` (44 MB), `.git`, and
-`backend/project_management.db`. The final image doesn't ship this bloat
-(only `frontend/out` is copied into the runtime stage, and the built image
-verified at 60.4 MB content), but every `docker build` pays the cost of
-uploading and layering that context, and `COPY frontend .`
-(`Dockerfile:5`) copies the host's `node_modules` into the intermediate
-build stage on top of the one `npm install` just created there — redundant
-even though not currently broken by it.
+The AI receives a snapshot of the board. The board remains editable while the request runs, then the response replaces the whole board. The backend also persists that snapshot-derived update before returning it. A user can lose a card edit or addition in a single browser tab without any second user involved.
 
-**Action**: add a `.dockerignore` excluding at least `node_modules`, `.git`,
-`.venv`, `**/__pycache__`, `*.db`, `frontend/.next`, `frontend/out`,
-`frontend/test-results`.
+**Evidence:** reproduced by requesting an AI rename of Done, changing Backlog locally while the request was pending, then resolving the AI response. The newer local column title reverted to Backlog.
 
-### 7. Silent failure on board load/save network errors
+**Plan qualification:** `docs/PLAN.md` acknowledges replacement rather than merging. Its single-user justification does not prevent this same-tab interleaving. A merge engine is not required to address it.
 
-`frontend/src/components/KanbanBoard.tsx`: both the load effect
-(`void loadBoard()`, calling `fetchBoard`) and the autosave effect
-(`void saveBoard(username, board)`) have no `.catch`. If the backend is
-unreachable or returns an error, `fetchBoard`/`saveBoard` reject, and the
-failure is swallowed — the UI just silently keeps showing stale/local state
-with no error message, so a broken save looks identical to a working one.
+**Recommendation:** for this MVP, disable board mutations while AI runs and coordinate pending saves before sending the AI request. Alternatively, add revision checks before persistence and replacement. Rejecting a stale response only in the browser is insufficient because the backend has already saved it. Test an edit immediately before submission and attempted edits during the request.
 
-**Action**: surface a visible error (reusing the existing `error`/`aiError`
-pattern already used elsewhere in the same component) when either call
-fails.
+### 5. The unauthenticated local app is published on all interfaces
 
-### 8. Redundant PUT immediately after every board load
+**Locations:** `docker-compose.yml:6-10`; `scripts/start.sh:7`; `scripts/start.ps1:6`; `scripts/start.bat:7`; `start-dev-combined.ps1:51`; `backend/app/main.py:289-316`.
 
-The autosave `useEffect` (`KanbanBoard.tsx`) depends on `[board, isSignedIn,
-username]` and fires whenever `board` changes — including the moment
-`fetchBoard` populates it right after sign-in. That triggers an immediate
-`PUT` of the exact data that was just `GET`-ed, on every sign-in/page load,
-for no reason.
+Compose publishes `8000:8000`, and native launchers bind Uvicorn to `0.0.0.0`. The sign-in gate is only in React; backend routes accept caller-selected usernames without authentication. If the machine's firewall/network permits access, another host can read or replace boards and invoke AI requests using the configured OpenRouter key.
 
-**Action**: skip the autosave effect on the render that follows the initial
-load (e.g. a `hasLoadedRef` guard), so it only fires for actual local edits.
+**Evidence:** static configuration and route inspection. External reachability was not tested, so this is conditional on the host network/firewall.
 
-### 9. Playwright test artifacts aren't gitignored
+**Recommendation:** publish `127.0.0.1:8000:8000` in Compose and use loopback for native development servers. Keep `0.0.0.0` inside the Docker container, where it is necessary for published-port access. Also constrain the Next development server if it is intended to be local-only. Real authentication is required before deliberate shared/network deployment, not as an extra requirement for this loopback-only demo.
 
-`frontend/.gitignore` excludes `/coverage`, `/.next/`, `/out/` but nothing
-for Playwright's `test-results/` or `playwright-report/` output. This
-literally caused untracked files to accumulate in this session's `git
-status` after running `npm run test:e2e` (screenshots and trace zips per
-test).
+### 6. AI calls block the backend event loop
 
-**Action**: add `test-results/` and `playwright-report/` to
-`frontend/.gitignore`.
+**Locations:** `backend/app/main.py:152-189,299-303,315-338`.
 
-## Low priority / nits
+Both AI handlers are `async def` but call synchronous `httpx.post` directly, with a 30-second timeout. While a provider call blocks, the default single Uvicorn worker cannot service unrelated requests, including autosave and health checks. SQLite operations are synchronous on the same event loop as well, although normally much shorter.
 
-### 10. Dead code: `AIRequestPayload`
+**Evidence:** a controlled coroutine probe replaced the provider call with a 250 ms blocking delay. A health coroutine scheduled for 10 ms completed after approximately 277 ms. No real OpenRouter request was made.
 
-`backend/app/main.py:72-73`:
+**Recommendation:** the smallest change is to make wholly synchronous handlers regular `def` handlers so FastAPI dispatches them to its worker pool. Alternatively, use an awaited `httpx.AsyncClient` and handle blocking database operations separately. Add a concurrent-request test showing health and board access remain responsive during a delayed AI response.
 
-```python
-class AIRequestPayload(dict):
-    pass
-```
+## P2 findings
 
-Defined, never referenced anywhere. Remove it.
+### 7. Autosave is neither flushed on logout nor ordered across requests
 
-### 11. Obsolete `version` key in `docker-compose.yml`
+**Location:** `frontend/src/components/KanbanBoard.tsx:81-98,112-126`.
 
-`docker-compose.yml:1` (`version: "3.9"`) triggers a deprecation warning on
-every `docker compose` command (confirmed live this session). Compose
-ignores it. Remove the line.
+The debounce cleanup discards any edit not yet sent when the user logs out. Closing or reloading the page before the timer fires has the same risk. Once a save has started, later saves can overlap: clearing the timeout does not cancel or serialize an HTTP request. With delayed/reordered delivery, an older board can be applied last. Completion callbacks can also clear a newer error. A failed save is retried only after another edit.
 
-### 12. Variable shadowing in `call_openrouter`
+**Evidence:** immediate edit followed by logout was reproduced with fake timers; no save occurred after advancing beyond the debounce. Overlapping request ordering and retry behavior were established by source inspection, not reproduced over a real network. A reversed response order alone would not prove reversed database writes.
 
-`backend/app/main.py`: the local `payload` (the outgoing request body) is
-reassigned to the parsed response JSON (`payload = response.json()`) a few
-lines later, reusing one name for two unrelated values in the same
-function. Harmless but makes the function harder to read at a glance; give
-the response body its own name (e.g. `response_body`).
+**Recommendation:** keep explicit loaded/dirty/saving state, serialize saves while coalescing pending edits, and await the latest save before completing logout. Warn before leaving with unsaved work or use an appropriate unload persistence mechanism. Offer retry after failure without requiring another edit. Test deferred saves with asymmetric board values and verify the final persisted value.
 
-### 13. `NewCardForm` inputs have no associated labels
+### 8. AI completions are not isolated from logout and later sign-in
 
-`frontend/src/components/NewCardForm.tsx`: the title and details inputs
-rely on `placeholder` text only, with no `<label>` — a real accessibility
-gap for screen reader users (placeholder text disappears once typing
-starts and isn't reliably announced as a field label).
+**Location:** `frontend/src/components/KanbanBoard.tsx:112-126,155-184`.
 
-**Action**: add visually-hidden `<label>` elements, consistent with the
-pattern already used in `KanbanCard.tsx`'s edit mode
-(`className="sr-only"`).
+Logout resets chat text but does not invalidate the active request or reset `isAiLoading`. An old request can later append an assistant message, set an error, or replace the board after logout or after signing in again. The initial board-loading effect has an `ignore` guard; the AI path does not.
 
-### 14. Malformed `history` entries crash `/api/ai/board` with a bare 500
+**Evidence:** static tracing of logout and asynchronous completion handlers.
 
-`backend/app/main.py`, the loop `for entry in history: role =
-entry.get("role")` assumes every item is a dict. A client sending a
-non-object item in `history` raises an unhandled `AttributeError`, which
-FastAPI turns into a generic 500 instead of a clean 422/400.
+**Recommendation:** use a session/request generation guard and reset pending UI state on logout. Decide explicitly whether to wait for an already-persisting AI operation before logout. Browser cancellation does not undo a server-side write. Test logout/relogin with both delayed AI success and delayed failure.
 
-**Action**: low priority given this endpoint has no untrusted external
-caller yet, but worth a `isinstance(entry, dict)` guard if the API is ever
-opened up.
+### 9. Malformed provider responses escape the promised error handling
 
-## Not flagged as issues (verified intentional / acceptable for the MVP)
+**Locations:** `backend/app/main.py:185-189,299-303,338-349`.
 
-- No auth beyond the hardcoded client-side check, and no server-side
-  validation that a `user` query param corresponds to a real session — this
-  matches `AGENTS.md`'s explicit MVP scope (single hardcoded user, DB
-  user-scoped for future growth only).
-- `init_db()` running on every request is redundant work but is documented,
-  intentional behavior (`CLAUDE.md`) that keeps the "auto-create the DB"
-  requirement trivially true; not worth the complexity of removing for an
-  MVP.
-- No merge/conflict handling for concurrent edits — already called out as
-  an accepted gap in `docs/PLAN.md` under "Known gaps / follow-ups", and
-  reasonable given the single-user-at-a-time constraint.
-- SQL queries are all parameterized (`?` placeholders) — no injection risk
-  found. No `dangerouslySetInnerHTML` or similar in the frontend — no XSS
-  vector found.
-- `.env` is correctly gitignored at the repo root; the OpenRouter API key
-  is never logged or echoed back in any response.
+The HTTP response's `json()` call is outside the exception handler. Model content is not checked for string type, and parsed model JSON is assumed to be an object. Only malformed JSON text is caught. Some invalid shapes are instead accepted, such as an empty object for `board_update`.
 
-## Summary of actions
+**Evidence:** mocked-provider probes returned 500 for a non-JSON HTTP 200 body, null message content, and model JSON `[]` or `null`. `{"reply":"ok","board_update":{}}` returned 200. This contradicts the plan's broader claim that malformed provider payloads surface as 502.
 
-| # | Priority | Action |
-|---|----------|--------|
-| 1 | High | Close SQLite connections properly (resource leak, evidenced by `ResourceWarning`) |
-| 2 | High | Use `uv` in the Dockerfile, or get sign-off to update the docs instead |
-| 3 | High | Fix the `next.config.ts` dev proxy port (8002) to match the documented backend port (8000) |
-| 4 | High | Create `frontend/AGENTS.md` and correct the false "done" checkbox in `docs/PLAN.md` |
-| 5 | Medium | Stop committing `backend/project_management.db`; gitignore + untrack it |
-| 6 | Medium | Add a `.dockerignore` |
-| 7 | Medium | Surface errors from failed `fetchBoard`/`saveBoard` calls instead of failing silently |
-| 8 | Medium | Skip the redundant autosave PUT right after the initial board load |
-| 9 | Medium | Gitignore Playwright's `test-results/` and `playwright-report/` |
-| 10 | Low | Remove dead `AIRequestPayload` class |
-| 11 | Low | Remove obsolete `version` key from `docker-compose.yml` |
-| 12 | Low | Rename the shadowed `payload` variable in `call_openrouter` |
-| 13 | Low | Add labels to `NewCardForm` inputs for accessibility |
-| 14 | Low | Guard against malformed `history` entries in `/api/ai/board` |
+**Recommendation:** validate the provider envelope and structured content before reading or persisting them; consistently map invalid upstream responses to a useful 502. Share this validation with finding 3. Ensure malformed output never changes the database.
+
+### 10. The PowerShell stop script fails before stopping the server
+
+**Location:** `scripts/stop.ps1:9-12`.
+
+PowerShell variable names are case-insensitive. `$pid` is the built-in, read-only `$PID`, so assigning the owning process ID throws whenever the script finds a connection. With `$ErrorActionPreference = "Stop"`, the script exits before `Stop-Process`.
+
+**Evidence:** safely reproduced the assignment alone; PowerShell returned `Cannot overwrite variable PID because it is read-only or constant.` No process was stopped.
+
+**Recommendation:** use a name such as `$processId`, together with the ownership check in finding 11. Test the script with a disposable project process and with no process running.
+
+### 11. Stop scripts identify the application only by its port
+
+**Locations:** `scripts/stop.bat:4-6`; `scripts/stop.sh:4-7`; `scripts/stop.ps1:3-12`.
+
+The scripts terminate processes using port 8000 without checking their ownership. If another application occupies that port, the stop command can terminate it. The Unix `lsof -ti :8000` query can also match a client connected to the port, not only the listener. The PowerShell variant currently fails earlier as described above, but renaming its variable alone would expose this behavior.
+
+**Evidence:** static inspection; no destructive stop command was executed.
+
+**Recommendation:** track and verify the project's launched process, or use Compose lifecycle commands for the Docker workflow. Verify that an unrelated disposable listener remains running when the project is stopped.
+
+### 12. The combined development launcher can send API requests to the wrong service
+
+**Locations:** `start-dev-combined.ps1:19-24,48-59`; `frontend/next.config.ts:8-14`.
+
+The script chooses another backend port when 8000 is occupied, but the Next proxy always targets `http://localhost:8000`. The frontend therefore reaches the old service or fails rather than using the newly launched backend. The script also hardcodes one user's repository path and Python installation, so it is not portable to another checkout.
+
+**Evidence:** static comparison of port selection, launcher arguments, and proxy destination.
+
+**Recommendation:** either fail clearly when the required port is occupied or pass the selected backend origin into Next configuration. Derive paths from `$PSScriptRoot` and use a documented interpreter/virtual environment. Verify the occupied-port case, not only the default case.
+
+### 13. Test isolation is incomplete and the suite can miss persistence failures
+
+**Locations:** `backend/tests/conftest.py:3-8`; `backend/app/main.py:361`; `frontend/playwright.config.ts:13-18`; `frontend/tests/kanban.spec.ts:3-62`.
+
+Backend test collection imports `main`, which calls `init_db()` before the fixture replaces `DB_PATH`. A normal test run can therefore create or perform schema initialization against the real database. Subsequent test requests are isolated, but the plan's claim that tests never touch that database is too strong.
+
+Playwright starts only Next and reuses an existing frontend server. It neither provisions an isolated backend nor resets its board data. When a real backend is available, tests modify the shared demo user's board. The editing test assumes the original `card-1` title, so persisted changes can make later runs fail. Without a backend, some checks can pass against the local fallback board instead of proving integration.
+
+**Evidence:** import order, fixture timing, and E2E setup/assertion inspection. Backend tests in this review intercepted SQLite connections during import to avoid touching the real database.
+
+**Recommendation:** initialize the database after configurable test settings are applied, preferably through app startup/app creation. Give E2E runs a disposable backend/database and deterministic seed state. Assert successful loading, wait for persistence, reload/re-sign in, and confirm exact saved values. Do not use the user's running application as a test fixture.
+
+### 14. Card movement is unavailable to keyboard-only users
+
+**Locations:** `frontend/src/components/KanbanBoard.tsx:44-48`; `frontend/src/components/KanbanCard.tsx:83-92`.
+
+Only `PointerSensor` is registered. Although Move is a focusable button, there is no keyboard sensor or alternative control for moving cards between columns.
+
+**Evidence:** static sensor/control inspection; no assistive-technology session was run.
+
+**Recommendation:** add a keyboard sensor with suitable sortable coordinates, or provide a simple Move-to-column control. Test starting, completing, and cancelling a move without a pointer.
+
+## P3 follow-ups
+
+- **Launcher output and lock handling:** `start-dev-combined.ps1:38-41,57` removes a Next lock without establishing that its owner is stopped. Lines 63 and 68 repeatedly use `Receive-Job -Keep`, replaying all accumulated logs every second; URLs at lines 87-89 appear only after the job loop exits. Preserve live locks, consume each log once, and print URLs when launching.
+- **Mac/Linux invocation:** Git records both shell scripts as `100644`, so direct `./scripts/start.sh` / `./scripts/stop.sh` invocation fails on a normal Unix checkout. Either commit executable mode or explicitly document `bash scripts/start.sh`. Native scripts assume dependencies and a suitable `python` command exist; document setup and supported interpreters rather than assuming every Mac provides `python`.
+- **Build reproducibility:** `Dockerfile:3-4` uses `npm install` despite a committed lock; prefer `npm ci` so a mismatched manifest fails instead of updating resolution. `backend/requirements.txt:1-5` pins only direct dependencies and includes pytest in the runtime image; lock transitive dependencies with uv and separate test dependencies when convenient. Floating base/tool versions make rebuilds time-dependent. No vulnerability or latest-version claim is made by this review.
+- **Secret exclusion:** `.dockerignore:1-13` does not exclude `.env`, although `.gitignore` does. Exclude `.env` and secret variants from eligible build-context files, preserving an explicitly allowed example if needed. The current Dockerfile does not explicitly copy the root `.env` into an image; an actual key leak was not observed.
+- **Runbook accuracy:** `docs/DATABASE_SCHEMA.md:5` says the database is in the project root, but `backend/app/main.py:14` puts it under `backend`. Native start scripts launch only the backend; on a fresh clone without `frontend/out`, `/` returns 404. Add a concise runbook covering Docker versus development startup, prerequisites, frontend export, credentials, shutdown, data persistence, and the loopback-only boundary. Backend guidance remains a placeholder.
+- **Test assertions:** `backend/tests/test_ai_connectivity.py:40-79` names a board-update test but uses empty columns/cards and never reads the database afterward. `frontend/src/components/KanbanBoard.test.tsx:60-75` checks that saving happened, not that the renamed column was sent. Use distinctive before/after values and persistence assertions; retain the existing reducer and edit-payload tests.
+
+## Verification performed
+
+| Check | Result |
+| --- | --- |
+| Existing backend suite | 10 passed; warnings from pytest import rewriting and installed dependencies. Run through an in-memory wrapper that redirected import-time SQLite connections to temporary storage, followed by the existing per-test DB fixture. |
+| Existing frontend unit/component suite (`npm run test:unit`) | 8 passed across 2 files. |
+| Frontend lint (`npm run lint`) | Passed. |
+| Frontend TypeScript (`npx tsc --noEmit`) | Passed. |
+| Temporary frontend reproduction probes | 3 passed, confirming the current bugs: save-before-load, AI overwriting an intervening local edit, and logout dropping a pending edit. Probes used mocked APIs/fake timers and were removed afterward. These are bug reproductions, not evidence that behavior is correct. |
+| Backend validation/error probes | Confirmed acceptance and persistence of invalid boards, malformed-provider 500s, and acceptance of an empty update object, using mocked AI and disposable SQLite files. |
+| Backend scheduling probe | Confirmed a blocking provider call delayed an unrelated coroutine. |
+| PowerShell reserved-variable probe | Confirmed the stop-script assignment failure without stopping any process. |
+| Docker/Unix script review | Static configuration and Git file-mode inspection only. |
+
+Not run: Docker build/recreation, destructive start/stop exercises, production frontend build, Playwright E2E, a rendered visual/accessibility audit, a live OpenRouter call, dependency vulnerability scanning, or testing on Mac/Linux. The plan's earlier live-test claims were treated as historical documentation, not as verification performed here. No real application data or API key was needed for these checks.
+
+## Suggested repair order
+
+1. Preserve the SQLite database across container recreation and restrict host exposure to loopback.
+2. Fix load-before-save, pending-save/logout behavior, and the single-tab AI/edit race together.
+3. Validate board and provider data before persistence; keep unrelated requests responsive during AI calls.
+4. Repair script lifecycle behavior and isolate integration tests, then add regressions for the reproduced failures.
+
+The existing pure drag reducer, parameterized SQL, separation of API helpers, and explicit structured-output request are useful foundations. Keep those simple boundaries; the main need is stronger persistence/lifecycle contracts and tests around failure paths, not a broad architectural rewrite.
