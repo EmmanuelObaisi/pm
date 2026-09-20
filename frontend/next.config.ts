@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    // next/font fetches Google Fonts at build time; behind a TLS-inspecting
+    // proxy that fails unless the system certificate store is trusted.
+    turbopackUseSystemTlsCerts: true,
+  },
   async rewrites() {
     return [
       {
