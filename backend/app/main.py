@@ -38,7 +38,8 @@ def hello() -> dict[str, str]:
     return {"message": "hello world"}
 
 
-db.init_db()
+# The schema is created by the lifespan handler above, not at import time:
+# importing this module must not touch, or migrate, a real database.
 
 if FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
