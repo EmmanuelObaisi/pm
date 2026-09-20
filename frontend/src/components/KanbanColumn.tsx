@@ -1,4 +1,3 @@
-import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Card, Column } from "@/lib/kanban";
@@ -8,6 +7,7 @@ import { NewCardForm } from "@/components/NewCardForm";
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
+  accent: string;
   onRename: (columnId: string, title: string) => void;
   onEditCard: (cardId: string, field: "title" | "details", value: string) => void;
   onAddCard: (columnId: string, title: string, details: string) => void;
@@ -17,6 +17,7 @@ type KanbanColumnProps = {
 export const KanbanColumn = ({
   column,
   cards,
+  accent,
   onRename,
   onEditCard,
   onAddCard,
@@ -27,48 +28,58 @@ export const KanbanColumn = ({
   return (
     <section
       ref={setNodeRef}
-      className={clsx(
-        "flex min-h-[520px] flex-col rounded-3xl border border-[var(--stroke)] bg-[var(--surface-strong)] p-4 shadow-[var(--shadow)] transition",
-        isOver && "ring-2 ring-[var(--accent-yellow)]"
-      )}
+      className="flex h-full min-w-[224px] flex-1 flex-col rounded-2xl border border-[var(--stroke)] bg-[var(--surface-strong)] transition-shadow"
+      style={{
+        boxShadow: isOver
+          ? `0 0 0 2px ${accent}, 0 12px 28px rgba(3, 33, 71, 0.12)`
+          : "0 1px 3px rgba(3, 33, 71, 0.06)",
+      }}
       data-testid={`column-${column.id}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="w-full">
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-10 rounded-full bg-[var(--accent-yellow)]" />
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
-              {cards.length} cards
-            </span>
-          </div>
-          <input
-            value={column.title}
-            onChange={(event) => onRename(column.id, event.target.value)}
-            className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
-            aria-label="Column title"
-          />
-        </div>
-      </div>
-      <div className="mt-4 flex flex-1 flex-col gap-3">
+      <header className="flex items-center gap-2.5 border-b border-[var(--stroke)] px-3 py-3">
+        <span
+          className="h-6 w-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: accent }}
+        />
+        <input
+          value={column.title}
+          onChange={(event) => onRename(column.id, event.target.value)}
+          className="min-w-0 flex-1 truncate rounded-md bg-transparent px-1 py-0.5 font-display text-sm font-semibold text-[var(--navy-dark)] outline-none transition hover:bg-[var(--surface)] focus:bg-[var(--surface)]"
+          aria-label="Column title"
+        />
+        <span
+          className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+          style={{ backgroundColor: `${accent}1a`, color: accent }}
+        >
+          {cards.length}
+        </span>
+      </header>
+
+      <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2.5">
         <SortableContext items={column.cardIds} strategy={verticalListSortingStrategy}>
           {cards.map((card) => (
             <KanbanCard
               key={card.id}
               card={card}
+              accent={accent}
               onEdit={(field, value) => onEditCard(card.id, field, value)}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />
           ))}
         </SortableContext>
         {cards.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-[var(--stroke)] px-3 py-6 text-center text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-[var(--stroke)] px-3 py-8 text-center text-xs font-medium text-[var(--gray-text)]">
             Drop a card here
           </div>
         )}
       </div>
-      <NewCardForm
-        onAdd={(title, details) => onAddCard(column.id, title, details)}
-      />
+
+      <div className="border-t border-[var(--stroke)] p-2.5">
+        <NewCardForm
+          accent={accent}
+          onAdd={(title, details) => onAddCard(column.id, title, details)}
+        />
+      </div>
     </section>
   );
 };

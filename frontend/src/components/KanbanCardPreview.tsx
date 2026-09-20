@@ -1,17 +1,23 @@
 import type { Card } from "@/lib/kanban";
+import { GripIcon } from "@/components/icons";
 
 type KanbanCardPreviewProps = {
   card: Card;
+  accent: string;
 };
 
-export const KanbanCardPreview = ({ card }: KanbanCardPreviewProps) => (
-  <article className="rounded-2xl border border-transparent bg-white px-4 py-4 shadow-[0_18px_32px_rgba(3,33,71,0.16)]">
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
+export const KanbanCardPreview = ({ card, accent }: KanbanCardPreviewProps) => (
+  <article
+    className="rotate-2 rounded-xl border border-[var(--stroke)] border-l-[3px] bg-white p-3 shadow-[0_18px_32px_rgba(3,33,71,0.18)]"
+    style={{ borderLeftColor: accent }}
+  >
+    <div className="flex items-start gap-1.5">
+      <GripIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--gray-text)]" />
+      <div className="min-w-0">
+        <h4 className="break-words font-display text-sm font-semibold leading-5 text-[var(--navy-dark)]">
           {card.title}
         </h4>
-        <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
+        <p className="mt-1 break-words text-xs leading-5 text-[var(--gray-text)]">
           {card.details}
         </p>
       </div>

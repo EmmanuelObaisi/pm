@@ -32,3 +32,30 @@ body {
 .font-display {
   font-family: var(--font-display), "Segoe UI", sans-serif;
 }
+
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(3, 33, 71, 0.18) transparent;
+}
+
+.scroll-slim::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: rgba(3, 33, 71, 0.16);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+.scroll-slim::-webkit-scrollbar-thumb:hover {
+  background: rgba(3, 33, 71, 0.3);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}

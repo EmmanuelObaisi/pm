@@ -13,13 +13,25 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import {
+  AlertIcon,
+  BoardIcon,
+  LogoutIcon,
+  PanelIcon,
+  SendIcon,
+  SparkIcon,
+} from "@/components/icons";
 import { askAI, fetchBoard, saveBoard } from "@/lib/api";
+import { columnAccent } from "@/lib/accents";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type ChatMessage = {
   role: "user" | "assistant";
   text: string;
 };
+
+const GREETING =
+  "I can help reorganize the board, add tasks, or move work between columns.";
 
 export const KanbanBoard = () => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
@@ -31,15 +43,13 @@ export const KanbanBoard = () => {
   const [chatOpen, setChatOpen] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      text: "I can help reorganize the board, add tasks, or move work between columns.",
-    },
+    { role: "assistant", text: GREETING },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [boardError, setBoardError] = useState("");
   const skipNextSaveRef = useRef(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -48,6 +58,10 @@ export const KanbanBoard = () => {
   );
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
+  const totalCards = useMemo(
+    () => board.columns.reduce((count, column) => count + column.cardIds.length, 0),
+    [board.columns]
+  );
 
   useEffect(() => {
     if (!isSignedIn || !username) {
@@ -97,6 +111,13 @@ export const KanbanBoard = () => {
     return () => window.clearTimeout(timeout);
   }, [board, isSignedIn, username]);
 
+  useEffect(() => {
+    const scroller = chatScrollRef.current;
+    if (scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  }, [chatMessages, isAiLoading]);
+
   const handleSignIn = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -115,12 +136,7 @@ export const KanbanBoard = () => {
     setPassword("");
     setError("");
     setChatInput("");
-    setChatMessages([
-      {
-        role: "assistant",
-        text: "I can help reorganize the board, add tasks, or move work between columns.",
-      },
-    ]);
+    setChatMessages([{ role: "assistant", text: GREETING }]);
     setAiError("");
     setBoardError("");
   };
@@ -139,8 +155,7 @@ export const KanbanBoard = () => {
     ];
     const conversationHistory = chatMessages
       .filter(
-        (message) =>
-          !(message.role === "assistant" && message.text === "I can help reorganize the board, add tasks, or move work between columns.")
+        (message) => !(message.role === "assistant" && message.text === GREETING)
       )
       .map((message) => ({
         role: message.role,
@@ -261,24 +276,35 @@ export const KanbanBoard = () => {
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeColumnIndex = activeCardId
+    ? board.columns.findIndex((column) => column.cardIds.includes(activeCardId))
+    : -1;
+  const activeAccent = columnAccent(Math.max(activeColumnIndex, 0));
 
   if (!isSignedIn) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--surface)] px-6 py-12">
-        <div className="w-full max-w-md rounded-[32px] border border-[var(--stroke)] bg-white p-8 shadow-[var(--shadow)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--gray-text)]">
-            Project workspace
-          </p>
-          <h1 className="mt-4 font-display text-3xl font-semibold text-[var(--navy-dark)]">
-            Sign in
-          </h1>
-          <p className="mt-2 text-sm text-[var(--gray-text)]">
-            Use the demo credentials to access the board.
-          </p>
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--surface)] px-6 py-12">
+        <div className="pointer-events-none absolute -left-40 -top-40 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.22)_0%,_transparent_70%)]" />
+        <div className="pointer-events-none absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_transparent_72%)]" />
 
-          <form className="mt-6 space-y-4" onSubmit={handleSignIn}>
+        <div className="relative w-full max-w-sm rounded-3xl border border-[var(--stroke)] bg-white p-8 shadow-[var(--shadow)]">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--navy-dark)] text-white">
+              <BoardIcon className="h-5 w-5" />
+            </span>
             <div>
-              <label htmlFor="username" className="mb-2 block text-sm font-medium text-[var(--navy-dark)]">
+              <h1 className="font-display text-xl font-semibold leading-tight text-[var(--navy-dark)]">
+                Sign in
+              </h1>
+              <p className="text-xs text-[var(--gray-text)]">
+                Kanban Studio workspace
+              </p>
+            </div>
+          </div>
+
+          <form className="mt-7 space-y-4" onSubmit={handleSignIn}>
+            <div>
+              <label htmlFor="username" className="mb-1.5 block text-xs font-semibold text-[var(--navy-dark)]">
                 Username
               </label>
               <input
@@ -286,12 +312,12 @@ export const KanbanBoard = () => {
                 type="text"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none focus:border-[var(--primary-blue)]"
+                className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none transition focus:border-[var(--primary-blue)]"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="mb-2 block text-sm font-medium text-[var(--navy-dark)]">
+              <label htmlFor="password" className="mb-1.5 block text-xs font-semibold text-[var(--navy-dark)]">
                 Password
               </label>
               <input
@@ -299,17 +325,20 @@ export const KanbanBoard = () => {
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none focus:border-[var(--primary-blue)]"
+                className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none transition focus:border-[var(--primary-blue)]"
               />
             </div>
 
             {error ? (
-              <p className="text-sm font-medium text-red-600">{error}</p>
+              <p className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+                <AlertIcon className="h-4 w-4 shrink-0" />
+                {error}
+              </p>
             ) : null}
 
             <button
               type="submit"
-              className="w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-white transition hover:brightness-110"
+              className="w-full rounded-xl bg-[var(--secondary-purple)] px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
             >
               Sign in
             </button>
@@ -320,165 +349,161 @@ export const KanbanBoard = () => {
   }
 
   return (
-    <div className="relative overflow-hidden">
-      <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
-
-      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col gap-10 px-6 pb-16 pt-12">
-        <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-                Single Board Kanban
-              </p>
-              <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                Kanban Studio
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
-                Keep momentum visible. Rename columns, drag cards between stages,
-                and capture quick notes without getting buried in settings.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                  Focus
-                </p>
-                <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                  One board. Five columns. Zero clutter.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
-              >
-                Log out
-              </button>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-4">
-            {board.columns.map((column) => (
-              <div
-                key={column.id}
-                className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)]"
-              >
-                <span className="h-2 w-2 rounded-full bg-[var(--accent-yellow)]" />
-                {column.title}
-              </div>
-            ))}
-          </div>
-        </header>
-
-        {boardError ? (
-          <p className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-600">
-            {boardError}
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--surface)]">
+      <header className="flex shrink-0 items-center gap-3 border-b border-[var(--stroke)] bg-white px-4 py-2.5 sm:px-6">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--navy-dark)] text-white">
+          <BoardIcon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <h1 className="truncate font-display text-base font-semibold leading-tight text-[var(--navy-dark)]">
+            Kanban Studio
+          </h1>
+          <p className="hidden text-xs text-[var(--gray-text)] sm:block">
+            {board.columns.length} columns · {totalCards} cards
           </p>
-        ) : null}
+        </div>
 
-        <div className="flex flex-col gap-6 xl:flex-row">
-          <div className="min-w-0 flex-1">
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCorners}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-            >
-              <section className="grid gap-6 lg:grid-cols-5">
-                {board.columns.map((column) => (
-                  <KanbanColumn
-                    key={column.id}
-                    column={column}
-                    cards={column.cardIds.map((cardId) => board.cards[cardId])}
-                    onRename={handleRenameColumn}
-                    onEditCard={handleEditCard}
-                    onAddCard={handleAddCard}
-                    onDeleteCard={handleDeleteCard}
-                  />
-                ))}
-              </section>
-              <DragOverlay>
-                {activeCard ? (
-                  <div className="w-[260px]">
-                    <KanbanCardPreview card={activeCard} />
-                  </div>
-                ) : null}
-              </DragOverlay>
-            </DndContext>
-          </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setChatOpen((open) => !open)}
+            aria-pressed={chatOpen}
+            className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+              chatOpen
+                ? "border-transparent bg-[var(--secondary-purple)] text-white"
+                : "border-[var(--stroke)] text-[var(--navy-dark)] hover:bg-[var(--surface)]"
+            }`}
+            title={chatOpen ? "Hide the assistant panel" : "Show the assistant panel"}
+          >
+            <PanelIcon className="h-4 w-4" />
+            <span className="hidden sm:inline">Assistant</span>
+          </button>
+          <span className="hidden items-center gap-2 rounded-xl border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--navy-dark)] md:flex">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary-blue)] text-[10px] font-bold uppercase text-white">
+              {username.slice(0, 1)}
+            </span>
+            {username}
+          </span>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--stroke)] text-[var(--gray-text)] transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+            aria-label="Log out"
+            title="Log out"
+          >
+            <LogoutIcon className="h-4 w-4" />
+          </button>
+        </div>
+      </header>
 
-          <aside className="w-full xl:w-[360px]">
-            <div className="flex h-full flex-col rounded-[28px] border border-[var(--stroke)] bg-white p-4 shadow-[var(--shadow)]">
-              <div className="mb-4 flex items-center justify-between gap-2 border-b border-[var(--stroke)] pb-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                    Assistant
-                  </p>
-                  <h2 className="mt-2 text-lg font-semibold text-[var(--navy-dark)]">
-                    AI Planner
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setChatOpen((open) => !open)}
-                  className="rounded-full border border-[var(--stroke)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)]"
-                >
-                  {chatOpen ? "Hide" : "Show"}
-                </button>
+      {boardError ? (
+        <p className="flex shrink-0 items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-2 text-xs font-medium text-red-600 sm:px-6">
+          <AlertIcon className="h-4 w-4 shrink-0" />
+          {boardError}
+        </p>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <section className="scroll-slim flex min-w-0 flex-1 items-stretch gap-3 overflow-x-auto px-4 py-4">
+            {board.columns.map((column, index) => (
+              <KanbanColumn
+                key={column.id}
+                column={column}
+                accent={columnAccent(index)}
+                cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                onRename={handleRenameColumn}
+                onEditCard={handleEditCard}
+                onAddCard={handleAddCard}
+                onDeleteCard={handleDeleteCard}
+              />
+            ))}
+          </section>
+          <DragOverlay>
+            {activeCard ? (
+              <div className="w-[260px]">
+                <KanbanCardPreview card={activeCard} accent={activeAccent} />
               </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
 
-              {chatOpen ? (
-                <>
-                  <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl bg-[var(--surface)] p-3">
-                    {chatMessages.map((message, index) => (
-                      <div
-                        key={`${message.role}-${index}`}
-                        className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-6 ${
-                          message.role === "assistant"
-                            ? "bg-white text-[var(--navy-dark)]"
-                            : "ml-auto bg-[var(--primary-blue)] text-white"
-                        }`}
-                      >
-                        {message.text}
-                      </div>
-                    ))}
-                    {isAiLoading ? (
-                      <div className="rounded-2xl bg-white px-3 py-2 text-sm text-[var(--gray-text)]">
-                        Thinking…
-                      </div>
-                    ) : null}
-                  </div>
+        {chatOpen ? (
+          <aside className="flex w-[300px] shrink-0 flex-col border-l border-[var(--stroke)] bg-white lg:w-[340px] xl:w-[360px]">
+            <div className="flex shrink-0 items-center gap-2.5 border-b border-[var(--stroke)] px-4 py-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(117,57,145,0.1)] text-[var(--secondary-purple)]">
+                <SparkIcon className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold leading-tight text-[var(--navy-dark)]">
+                  AI Planner
+                </h2>
+                <p className="truncate text-[11px] text-[var(--gray-text)]">
+                  Ask it to reshape the board
+                </p>
+              </div>
+            </div>
 
-                  {aiError ? (
-                    <p className="mt-3 text-sm font-medium text-red-600">{aiError}</p>
-                  ) : null}
-
-                  <form onSubmit={handleAskAI} className="mt-4 space-y-3">
-                    <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]" htmlFor="ai-question">
-                      Question
-                    </label>
-                    <textarea
-                      id="ai-question"
-                      value={chatInput}
-                      onChange={(event) => setChatInput(event.target.value)}
-                      rows={4}
-                      placeholder="Ask for a change to the board..."
-                      className="w-full rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--navy-dark)] outline-none focus:border-[var(--primary-blue)]"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isAiLoading || !chatInput.trim()}
-                      className="w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isAiLoading ? "Sending..." : "Send"}
-                    </button>
-                  </form>
-                </>
+            <div
+              ref={chatScrollRef}
+              className="scroll-slim flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto bg-[var(--surface)] p-3"
+            >
+              {chatMessages.map((message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs leading-5 ${
+                    message.role === "assistant"
+                      ? "rounded-bl-md border border-[var(--stroke)] bg-white text-[var(--navy-dark)]"
+                      : "ml-auto rounded-br-md bg-[var(--primary-blue)] text-white"
+                  }`}
+                >
+                  {message.text}
+                </div>
+              ))}
+              {isAiLoading ? (
+                <div className="flex max-w-[88%] items-center gap-2 rounded-2xl rounded-bl-md border border-[var(--stroke)] bg-white px-3 py-2 text-xs text-[var(--gray-text)]">
+                  <SparkIcon className="h-3.5 w-3.5 animate-pulse" />
+                  Thinking…
+                </div>
               ) : null}
             </div>
+
+            {aiError ? (
+              <p className="flex shrink-0 items-center gap-2 border-t border-red-100 bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+                <AlertIcon className="h-4 w-4 shrink-0" />
+                {aiError}
+              </p>
+            ) : null}
+
+            <form onSubmit={handleAskAI} className="shrink-0 border-t border-[var(--stroke)] p-3">
+              <label className="sr-only" htmlFor="ai-question">
+                Question
+              </label>
+              <textarea
+                id="ai-question"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                rows={3}
+                placeholder="Ask for a change to the board..."
+                className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-xs leading-5 text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+              />
+              <button
+                type="submit"
+                disabled={isAiLoading || !chatInput.trim()}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--secondary-purple)] px-4 py-2.5 text-xs font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <SendIcon className="h-4 w-4" />
+                {isAiLoading ? "Sending..." : "Send"}
+              </button>
+            </form>
           </aside>
-        </div>
-      </main>
+        ) : null}
+      </div>
     </div>
   );
 };
