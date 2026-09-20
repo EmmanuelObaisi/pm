@@ -177,3 +177,8 @@ cython_debug/
 
 .DS_Store
 
+# Generated test output
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+backend/e2e.db

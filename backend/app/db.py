@@ -1,11 +1,16 @@
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-DB_PATH = (Path(__file__).resolve().parent.parent / "project_management.db").resolve()
+# PM_DB_PATH lets a throwaway instance (the e2e run, for one) keep its own file.
+DB_PATH = Path(
+    os.getenv("PM_DB_PATH")
+    or Path(__file__).resolve().parent.parent / "project_management.db"
+).resolve()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

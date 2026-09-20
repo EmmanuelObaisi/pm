@@ -98,15 +98,17 @@ export const BoardCard = ({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: cardDragId(card.id), disabled: !draggable });
 
+  // The card itself is the drag handle. dnd-kit's attributes carry
+  // role="button", so nesting a second control inside would be invalid ARIA.
   return (
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={clsx(isDragging && "opacity-40")}
-      {...attributes}
-      {...listeners}
     >
       <button
+        {...attributes}
+        {...listeners}
         type="button"
         onClick={() => onOpen(card.id)}
         className="w-full cursor-pointer text-left"
