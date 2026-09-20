@@ -4,86 +4,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-A project management web app: a NextJS frontend and a FastAPI backend over
-SQLite, with multi-user accounts, many Kanban boards per user, board sharing,
-and an AI chat sidebar that reads and edits a board through OpenRouter. See
-`AGENTS.md` for the business requirements and technical decisions,
-`docs/UPGRADE_PLAN.md` for the plan that took this past its MVP shape, and
-`docs/DATABASE_SCHEMA.md` for the schema.
+A multi-user Project Management app: NextJS frontend + FastAPI backend over SQLite, with Kanban boards that can be shared between accounts and a per-board AI chat sidebar that reads the board and changes it through OpenRouter.
 
-Key constraints from `AGENTS.md` (do not violate without asking):
+`AGENTS.md` holds the business requirements; `backend/AGENTS.md`, `frontend/AGENTS.md` and `scripts/AGENTS.md` describe each area's layout and are kept current — read those before changing code in them. `docs/DATABASE_SCHEMA.md` covers the schema and `docs/UPGRADE_PLAN.md` the MVP-to-current upgrade.
+
+This started as an MVP (one hardcoded account, one board per user, whole board stored as a JSON blob). Those limits were **lifted deliberately** — if you find a doc or comment describing that shape, it is stale, not a constraint to preserve. What still holds:
+
 - Runs locally in Docker; SQLite is the database, created automatically if missing.
-- Use `uv` as the Python package manager inside Docker (the repo's `.venv`/`requirements.txt` are used for local dev outside Docker).
+- A fresh instance seeds a `user` / `password` admin account so sign-in works immediately (`repository.ensure_demo_user`), but real registration and password hashing are the actual auth path.
+- `uv` is the Python package manager inside Docker (the repo's `.venv`/`requirements.txt` are for local dev outside Docker).
 - AI calls go through OpenRouter using model `openai/gpt-oss-120b`; `OPENROUTER_API_KEY` lives in the root `.env`.
 - Keep it simple: no over-engineering, no unnecessary defensive programming, no emojis anywhere.
 - When debugging, find the root cause before fixing — don't guess.
 
 ## Architecture
 
-**Backend** (`backend/app/`) is a modular FastAPI app:
-- `config.py` reads the root `.env` and holds JWT, password, and OpenRouter settings.
-- `db.py` owns the SQLite schema, the `connect()` transaction helper, and `migrate_legacy_schema`, which converts an MVP database (one `boards.board_json` blob per user) into the normalized schema on first open. `DB_PATH` defaults to `backend/project_management.db` and is overridable with the `PM_DB_PATH` environment variable (the e2e run uses this) or by monkeypatching `db.DB_PATH` in tests.
-- `security.py` does PBKDF2-SHA256 password hashing and JWT encode/decode.
-- `repository.py` is all data access and serialization. `board_detail()` builds the whole-board payload every mutating route returns.
-- `deps.py` provides `get_db`, `get_current_user`, `get_current_admin`, and the `board_access`/`card_access`/`column_access` dependency factories that enforce the owner > editor > viewer ladder. A non-member gets 404 (not 403) so board existence does not leak.
-- `routers/` holds `auth.py` (plus the admin router), `boards.py` (boards, members, columns, labels, activity, stats), `cards.py` (cards, moves, checklists, comments), and `ai.py`.
-- `ai.py` builds the OpenRouter request and applies the assistant's operations. The model returns `{reply, operations[]}` under a strict JSON schema; each operation is validated against the board and applied one at a time, and failures are collected into `errors` rather than aborting the batch.
-- Auth is JWT bearer. The first account registered on an empty instance becomes an admin; a real server also seeds a `user` / `password` admin via the lifespan handler.
+**Backend** (`backend/app/`) is a package, not a single file. `main.py` is wiring only: it includes the routers, serves `/health` and `/api/hello`, creates the schema and demo user in a `lifespan` handler (deliberately *not* at import time), and mounts `frontend/out` at `/` when that directory exists.
 
-**Frontend** (`frontend/src/`):
-- `lib/types.ts` mirrors the API payloads; `lib/api.ts` is the typed client (it holds the bearer token in a module variable set by `setAuthToken` and throws `ApiError` carrying the status).
-- `lib/board.ts` is the pure logic: drag-id encoding, `resolveDrop` (which slot a drop maps to), `withCardMoved` (the optimistic local move), filtering, and presentation helpers. It is unit-tested in isolation.
-- `lib/session.ts` persists the session in localStorage; every access is guarded because storage can be unavailable.
-- `components/Workspace.tsx` is the root: it restores and revalidates the session, then switches between `BoardList`, `BoardView`, and `AccountPanel`.
-- `BoardView.tsx` owns the board state. Every mutation calls the API and replaces the board wholesale with what comes back; drags apply optimistically first and reconcile with the server's board.
-- `CardDrawer.tsx`, `ChatPanel.tsx`, and `BoardSidebar.tsx` (stats, members, labels, activity) are the side surfaces.
+- **Auth**: JWT bearer tokens (`security.py`, PyJWT, HS256) over PBKDF2-SHA256 password hashes with a per-user salt. `JWT_SECRET` defaults to a development value — set it for anything real. The first account registered on an empty instance becomes admin.
+- **Schema** (`db.py`): fully normalized — `users`, `boards`, `board_members`, `board_columns`, `labels`, `cards`, `card_labels`, `checklist_items`, `comments`, `activity`, `ai_messages`. `migrate_legacy_schema()` upgrades an MVP database (`boards.board_json`) in place on first open. `DB_PATH` is overridable with the `PM_DB_PATH` env var.
+- **Access control** (`deps.py`): board membership carries a role — `viewer` < `editor` < `owner` (`repository.ROLE_RANK`). The `board_access(minimum)` / `card_access(minimum)` / `column_access(minimum)` dependency factories resolve the target, check the caller's role, and return a `BoardContext`. A non-member gets 404, not 403, so board existence isn't leaked.
+- **Data layer**: all SQL lives in `repository.py`. Mutating routes return the whole board via `board_detail()`, so the client never merges partial updates.
+- **Routes** (`app/routers/`): `auth.py` (`/api/auth/register|login|me|password|users`, plus an admin router at `/api/admin/users`), `boards.py` (boards, members, columns, labels, stats, activity), `cards.py` (cards, moves, checklists, comments), `ai.py` (`/api/boards/{id}/ai` and its message history).
 
-**Docker**: `Dockerfile` is a two-stage build — builds the Next static export (`npm run build` → `frontend/out`) then copies it alongside the backend into a `python:3.12-slim` image running `uvicorn app.main:app` on port 8000. `docker-compose.yml` passes `OPENROUTER_API_KEY` through from the environment/`.env`. In production the export is mounted at `/` via `StaticFiles`, which only happens if `frontend/out` exists, so a fresh clone without a frontend build simply won't serve `/`.
+**AI** (`backend/app/ai.py`): the model does **not** return a replacement board. It returns `{"reply": str, "operations": [...]}` under a strict OpenRouter JSON-schema response format, where each operation is one of `create_card`, `update_card`, `move_card`, `delete_card`, `archive_card`, `create_column`, `rename_column`, `delete_column`, `add_comment`. Operations are validated against the board and applied one at a time; a failing one is collected into `errors` while the rest still run, and each success is written to the activity feed. Chat history persists in `ai_messages` (last 20 turns are sent as context).
+
+**Frontend** (`frontend/src/`) is a component tree rooted at `Workspace.tsx`, not a single page:
+- `lib/api.ts` is the typed client — holds the bearer token in a module variable set via `setAuthToken`, throws `ApiError` carrying the HTTP status.
+- `lib/board.ts` is the pure, separately unit-tested logic: drag-id encoding, `resolveDrop`, `withCardMoved` (optimistic local move), filtering.
+- `lib/session.ts` persists the session in localStorage, so a reload stays signed in; every access is wrapped because storage can be blocked.
+- `components/`: `AuthScreen`, `BoardList`, `BoardView` (+ `BoardColumn`, `BoardCard`, `CardDrawer`), `ChatPanel`, `AccountPanel`, `BoardSidebar`, `ui.tsx`.
+- `next.config.ts` sets `output: "export"` and rewrites `/api/*` to `http://localhost:8000` in dev — there is a real proxy, no CORS config needed.
+
+**Docker**: two-stage build (Next static export, then `python:3.12-slim` running uvicorn on 8000). `docker-compose.yml` passes `OPENROUTER_API_KEY` and `JWT_SECRET` through and keeps the DB on a named volume at `/data`.
 
 ## Common commands
 
-Frontend (run from `frontend/`):
+Frontend (from `frontend/`):
 ```
 npm install
-npm run dev          # Next dev server, proxies /api to localhost:8000
+npm run dev          # Next dev server, proxies /api to port 8000
 npm run build        # production build + static export to frontend/out
 npm run lint
 npm run test         # or test:unit — vitest run
 npm run test:unit:watch
-npm run test:e2e     # playwright — starts the backend and the dev server itself
-npm run test:all     # unit then e2e
+npm run test:e2e     # playwright — starts BOTH backend and frontend itself
+npm run test:all
 ```
-Run a single vitest file/test: `npx vitest run src/lib/board.test.ts` or `npx vitest run -t "test name"`.
-Run a single playwright test: `npx playwright test tests/workspace.spec.ts -g "test name"`.
-Coverage thresholds are enforced in `vitest.config.ts` (90% statements/lines, 85% branches/functions).
+Single test: `npx vitest run src/lib/board.test.ts`, `npx vitest run -t "test name"`, `npx playwright test tests/workspace.spec.ts -g "test name"`.
 
-Backend (run from `backend/`, using the project's Python — a `.venv` exists at the repo root):
+Backend (from `backend/` — imports are `from app import ...`, so the working directory matters):
 ```
-pip install -r requirements-dev.txt   # requirements.txt is runtime only, used by Docker
+pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-pytest                          # all backend tests, with coverage
-pytest tests/test_cards.py      # single file
-pytest -k test_name             # single test by name
+pytest
+pytest tests/test_boards.py
+pytest -k test_name
 ```
-Backend tests must be run with `backend/` as the working directory (imports use `from app import ...`). `pytest.ini` sets the coverage gate at 90%.
 
-Local dev convenience scripts:
-- `scripts/start.ps1` / `start.sh` / `start.bat` — start the backend only, on port 8000.
-- `scripts/stop.ps1` / `stop.sh` / `stop.bat` — stop it.
-- `start-dev-combined.ps1` (repo root, Windows-specific, hardcoded paths) — starts backend and frontend together in background jobs on the first free ports in 8000–8099 / 3000–3099, streaming both logs into one terminal.
-
-Docker:
-```
-docker compose up --build
-```
-Serves the full app (frontend static export + backend API) on port 8000.
+Local dev: `scripts/start.*` / `stop.*` run the backend only on port 8000; `start-dev-combined.ps1` (repo root, Windows, hardcoded paths) runs both. `docker compose up --build` serves everything on 8000.
 
 ## Testing notes
 
-- `backend/tests/conftest.py` gives every test its own SQLite file (it patches `db.DB_PATH` and clears the init cache) and drops the PBKDF2 round count, which would otherwise dominate the suite's runtime. The `alice`/`bob`/`board` fixtures wrap a registered account and a token-bearing client.
-- Backend tests use FastAPI's `TestClient` against the app instance — no live server — and patch `httpx.post` for the AI tests rather than calling OpenRouter. Note that plain `TestClient(app)` does not run the lifespan handler, so the demo account is only seeded in tests that enter it as a context manager.
-- Frontend unit/integration tests (vitest + Testing Library) live next to their source. `src/test/factories.ts` builds board fixtures; `boardWithCards([["A","B"],["C"]])` gives columns 1..n with card ids 101, 102, ....
-- `src/test/setup.ts` stands up `localStorage` and `scrollIntoView`, neither of which this jsdom build provides.
-- Drag and drop is covered two ways: the pure slot arithmetic in `board.test.ts`, and `BoardView.dnd.test.tsx`, which stubs `DndContext` to call the drag handlers directly because real pointer dragging needs layout jsdom does not have. The browser path is covered by Playwright.
-- Playwright (`frontend/tests/workspace.spec.ts`) starts both servers itself. Each test registers a fresh account, so runs do not collide; the backend runs against a throwaway `backend/e2e.db` via `PM_DB_PATH`.
-- `backend/project_management.db` is a real SQLite file in the working tree (not test data) — avoid deleting or overwriting it casually.
+- Both suites enforce coverage gates, so new code without tests fails the run: `backend/pytest.ini` sets `--cov-fail-under=90`, and `vitest.config.ts` sets 90% statements/lines and 85% branches/functions over `src/lib` and `src/components`.
+- Backend tests use `TestClient` against the app instance. `conftest.py` gives each test its own SQLite file (patching `db.DB_PATH` **and** resetting `db._initialized`), drops `PASSWORD_ROUNDS` to 1000 for speed, and provides `alice`/`bob`/`board` fixtures built on an `ApiUser` helper that registers an account and sends its bearer token. AI tests mock `httpx.post` rather than hitting OpenRouter.
+- Frontend unit/integration tests (vitest + Testing Library) sit next to their source.
+- Playwright (`frontend/tests/`) starts both servers itself with `PM_DB_PATH=e2e.db`, so e2e never touches the real database. It reuses already-running servers.
+- `backend/project_management.db` is a real working database, not test data — don't delete or overwrite it casually.
+
+## Environment note
+
+Local HTTPS may be intercepted by antivirus or a corporate proxy that re-signs traffic with a root installed only in the OS certificate store (Avast Free Antivirus on the current dev machine). Python's default certifi bundle doesn't contain that root, so OpenRouter calls fail with `CERTIFICATE_VERIFY_FAILED`.
+
+Both sides already handle this and need no per-machine setup: `config.py` calls `truststore.inject_into_ssl()` so Python verifies against the OS trust store, and `next.config.ts` sets `turbopackUseSystemTlsCerts` for `next/font`. Verification stays enabled in both — only the source of trusted roots changes. Never "fix" a TLS error here with `verify=False`.
+
+To inspect a chain when something still fails:
+```
+echo | openssl s_client -connect openrouter.ai:443 -servername openrouter.ai 2>/dev/null | grep -E "^ *[0-9] s:|^ *i:"
+```
