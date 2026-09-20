@@ -146,6 +146,27 @@ test("drag a card to another column", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("archive a card and restore it", async ({ page }) => {
+  await register(page);
+  await createBoard(page, "Archiving");
+  await addCard(page, "Backlog", "Put me away");
+
+  await page.getByRole("button", { name: "Open card Put me away" }).click();
+  const drawer = page.getByRole("dialog", { name: "Card Put me away" });
+  await drawer.getByRole("button", { name: "Archive" }).click();
+  await expect(page.getByText("Put me away")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Details" }).click();
+  const sidebar = page.getByRole("complementary", { name: "Board details" });
+  await sidebar.getByRole("button", { name: "Archive" }).click();
+  await expect(sidebar.getByText("Put me away")).toBeVisible();
+
+  await sidebar.getByRole("button", { name: "Restore Put me away" }).click();
+  await expect(
+    page.getByRole("region", { name: "Column Backlog" }).getByText("Put me away")
+  ).toBeVisible();
+});
+
 test("add and delete a column", async ({ page }) => {
   await register(page);
   await createBoard(page, "Columns");

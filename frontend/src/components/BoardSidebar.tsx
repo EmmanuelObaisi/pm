@@ -4,26 +4,29 @@ import { useEffect, useState } from "react";
 
 import * as api from "@/lib/api";
 import { formatDate } from "@/lib/board";
-import type { ActivityEntry, Board, Member } from "@/lib/types";
+import type { ActivityEntry, Board, Card, Member } from "@/lib/types";
 import { Badge, Button, ErrorText, Input, Spinner } from "@/components/ui";
 
-type Tab = "stats" | "members" | "labels" | "activity";
+type Tab = "stats" | "members" | "labels" | "archive" | "activity";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "stats", label: "Stats" },
   { id: "members", label: "Members" },
   { id: "labels", label: "Labels" },
+  { id: "archive", label: "Archive" },
   { id: "activity", label: "Activity" },
 ];
 
 export const BoardSidebar = ({
   board,
   canManage,
+  canEdit,
   onBoardChange,
   onClose,
 }: {
   board: Board;
   canManage: boolean;
+  canEdit: boolean;
   onBoardChange: (board: Board) => void;
   onClose: () => void;
 }) => {
@@ -32,6 +35,7 @@ export const BoardSidebar = ({
   const [memberEdits, setMembers] = useState<Member[] | null>(null);
   const members = memberEdits ?? board.members;
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
+  const [archived, setArchived] = useState<Card[] | null>(null);
   const [memberName, setMemberName] = useState("");
   const [memberRole, setMemberRole] = useState<"editor" | "viewer">("editor");
   const [labelName, setLabelName] = useState("");
@@ -47,6 +51,23 @@ export const BoardSidebar = ({
       .fetchActivity(board.id)
       .then((loaded) => !cancelled && setActivity(loaded))
       .catch(() => !cancelled && setActivity([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, board.id, board.updated_at]);
+
+  useEffect(() => {
+    if (tab !== "archive") {
+      return;
+    }
+    let cancelled = false;
+    // Archived cards are left out of the board payload, so ask for them.
+    api
+      .fetchBoard(board.id, true)
+      .then((full) =>
+        !cancelled && setArchived(full.cards.filter((card) => card.archived))
+      )
+      .catch(() => !cancelled && setArchived([]));
     return () => {
       cancelled = true;
     };
@@ -296,6 +317,65 @@ export const BoardSidebar = ({
               </Button>
             </form>
           </div>
+        ) : null}
+
+        {tab === "archive" ? (
+          archived === null ? (
+            <Spinner label="Loading archived cards" />
+          ) : archived.length === 0 ? (
+            <p className="text-[var(--gray-text)]">No archived cards.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {archived.map((card) => (
+                <li
+                  key={card.id}
+                  className="flex items-center gap-2 border-b border-[var(--stroke)] pb-2"
+                >
+                  <span className="flex-1">{card.title}</span>
+                  {canEdit ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Restore ${card.title}`}
+                        onClick={async () => {
+                          try {
+                            onBoardChange(
+                              await api.updateCard(card.id, { archived: false })
+                            );
+                            setArchived(
+                              archived.filter((item) => item.id !== card.id)
+                            );
+                          } catch (caught) {
+                            report(caught, "Could not restore that card");
+                          }
+                        }}
+                      >
+                        Restore
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Delete ${card.title}`}
+                        onClick={async () => {
+                          try {
+                            onBoardChange(await api.deleteCard(card.id));
+                            setArchived(
+                              archived.filter((item) => item.id !== card.id)
+                            );
+                          } catch (caught) {
+                            report(caught, "Could not delete that card");
+                          }
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )
         ) : null}
 
         {tab === "activity" ? (

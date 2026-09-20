@@ -32,13 +32,14 @@ const buildBoard = (overrides: Partial<Board> = {}): Board => {
   return board;
 };
 
-const renderSidebar = (board = buildBoard(), canManage = true) => {
+const renderSidebar = (board = buildBoard(), canManage = true, canEdit = true) => {
   const onBoardChange = vi.fn();
   const onClose = vi.fn();
   render(
     <BoardSidebar
       board={board}
       canManage={canManage}
+      canEdit={canEdit}
       onBoardChange={onBoardChange}
       onClose={onClose}
     />
@@ -198,6 +199,90 @@ describe("labels tab", () => {
     const user = await openLabels();
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(api.createLabel).not.toHaveBeenCalled();
+  });
+});
+
+describe("archive tab", () => {
+  const openArchive = async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    return user;
+  };
+
+  const withArchived = () => {
+    const board = buildBoard();
+    const full = buildBoard();
+    full.cards[0] = { ...full.cards[0], archived: true, title: "Old task" };
+    vi.mocked(api.fetchBoard).mockResolvedValue(full);
+    return board;
+  };
+
+  it("asks for archived cards and lists them", async () => {
+    renderSidebar(withArchived());
+    await openArchive();
+
+    expect(await screen.findByText("Old task")).toBeInTheDocument();
+    expect(api.fetchBoard).toHaveBeenCalledWith(1, true);
+  });
+
+  it("says so when nothing is archived", async () => {
+    vi.mocked(api.fetchBoard).mockResolvedValue(buildBoard());
+    renderSidebar();
+    await openArchive();
+    expect(await screen.findByText("No archived cards.")).toBeInTheDocument();
+  });
+
+  it("restores a card back onto the board", async () => {
+    const board = withArchived();
+    vi.mocked(api.updateCard).mockResolvedValue(board);
+    const { onBoardChange } = renderSidebar(board);
+    const user = await openArchive();
+
+    await user.click(await screen.findByRole("button", { name: "Restore Old task" }));
+
+    expect(api.updateCard).toHaveBeenCalledWith(101, { archived: false });
+    await waitFor(() => expect(onBoardChange).toHaveBeenCalledWith(board));
+    await waitFor(() => expect(screen.queryByText("Old task")).not.toBeInTheDocument());
+  });
+
+  it("deletes an archived card for good", async () => {
+    const board = withArchived();
+    vi.mocked(api.deleteCard).mockResolvedValue(board);
+    renderSidebar(board);
+    const user = await openArchive();
+
+    await user.click(await screen.findByRole("button", { name: "Delete Old task" }));
+    expect(api.deleteCard).toHaveBeenCalledWith(101);
+  });
+
+  it("reports a failed restore", async () => {
+    const board = withArchived();
+    vi.mocked(api.updateCard).mockRejectedValue(new Error("Requires editor access"));
+    renderSidebar(board);
+    const user = await openArchive();
+
+    await user.click(await screen.findByRole("button", { name: "Restore Old task" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Requires editor access");
+  });
+
+  it("offers a viewer no restore or delete", async () => {
+    renderSidebar(withArchived(), false, false);
+    await openArchive();
+
+    expect(await screen.findByText("Old task")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Restore Old task" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete Old task" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("recovers when archived cards cannot be loaded", async () => {
+    vi.mocked(api.fetchBoard).mockRejectedValue(new Error("nope"));
+    renderSidebar();
+    await openArchive();
+    expect(await screen.findByText("No archived cards.")).toBeInTheDocument();
   });
 });
 

@@ -3,6 +3,7 @@
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   closestCorners,
   useSensor,
@@ -10,6 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import * as api from "@/lib/api";
@@ -54,7 +56,9 @@ export const BoardView = ({
   const [columnTitle, setColumnTitle] = useState("");
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Space picks a card up, the arrow keys move it, space drops it.
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   useEffect(() => {
@@ -347,6 +351,7 @@ export const BoardView = ({
           <BoardSidebar
             board={board}
             canManage={isOwner(board)}
+            canEdit={editable}
             onBoardChange={setBoard}
             onClose={() => setShowSidebar(false)}
           />
