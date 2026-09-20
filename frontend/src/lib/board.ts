@@ -49,6 +49,11 @@ export const resolveDrop = (
     return null;
   }
 
+  // Picking a card up and dropping it on itself is not a move.
+  if (over.kind === "card" && over.id === active.id) {
+    return null;
+  }
+
   const source = columnOfCard(board, active.id);
   if (!source) {
     return null;

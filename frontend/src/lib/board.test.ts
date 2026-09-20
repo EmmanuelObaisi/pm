@@ -111,6 +111,10 @@ describe("resolveDrop", () => {
     });
   });
 
+  it("treats a card dropped on itself as no move", () => {
+    expect(resolveDrop(board, cardDragId(101), cardDragId(101))).toBeNull();
+  });
+
   it("ignores drops that are not a card being dragged", () => {
     expect(resolveDrop(board, columnDragId(1), columnDragId(2))).toBeNull();
     expect(resolveDrop(board, "junk", columnDragId(2))).toBeNull();

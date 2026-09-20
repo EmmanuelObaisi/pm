@@ -57,15 +57,6 @@ export const BoardView = ({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
-  const load = useCallback(async () => {
-    try {
-      setBoard(await api.fetchBoard(boardId));
-      setError("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load the board");
-    }
-  }, [boardId]);
-
   useEffect(() => {
     let cancelled = false;
     api
@@ -130,7 +121,8 @@ export const BoardView = ({
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not move the card");
-      await load();
+      // Undo the optimistic move without clearing the message explaining why.
+      setBoard(await api.fetchBoard(boardId));
     }
   };
 
