@@ -38,10 +38,33 @@ it simple, root-cause debugging.
 
 ## Status
 
-- [ ] Phase 1 backend rewrite
-- [ ] Phase 2 AI operations
-- [ ] Phase 3 frontend foundation
-- [ ] Phase 4 frontend board view
-- [ ] Phase 5 frontend collaboration
-- [ ] Phase 6 test hardening
-- [ ] Phase 7 docs and packaging
+- [x] Phase 1 backend rewrite
+- [x] Phase 2 AI operations
+- [x] Phase 3 frontend foundation
+- [x] Phase 4 frontend board view
+- [x] Phase 5 frontend collaboration
+- [x] Phase 6 test hardening
+- [x] Phase 7 docs and packaging
+
+## Where it landed
+
+Backend: 131 pytest tests, 98% coverage, gate at 90% in `pytest.ini`.
+Frontend: 245 vitest tests, 99% statements and 94% branches, gates in
+`vitest.config.ts`. End to end: 14 Playwright tests driving a real browser
+against a real backend on a throwaway database.
+
+Verified live against OpenRouter with `openai/gpt-oss-120b`: the assistant
+created cards at a requested priority and, on a second turn using the
+persisted conversation, moved one between columns, with no operation errors.
+
+## Not done
+
+- `docker compose up --build` has not been run in this environment; the Docker
+  daemon was not available. The Dockerfile copies `backend/` wholesale so it
+  picks up the new `app/routers/` package, and `.dockerignore` already
+  excludes databases and test output, but the build itself is unverified.
+- The assistant cannot reorder columns or manage labels and checklists; its
+  operations cover cards, columns, and comments.
+- There is no per-user view across boards (an "assigned to me" inbox), no
+  notifications, and no pagination anywhere. Activity and AI history are
+  capped by a limit rather than paged.

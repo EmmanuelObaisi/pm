@@ -1,5 +1,11 @@
 # Project plan
 
+> Superseded. This plan describes the MVP: one hardcoded `user`/`password`
+> account, one board per user, and the whole board stored as a single JSON
+> blob. All of that was deliberately replaced. See `docs/UPGRADE_PLAN.md` for
+> the plan that took its place and where the work landed, and `CLAUDE.md` for
+> how the code is laid out now. Kept for the history of how the MVP was built.
+
 Phased build plan for the Project Management MVP. See `AGENTS.md` for business
 requirements and technical decisions, and `docs/DATABASE_SCHEMA.md` for the DB
 schema. Each part lists substeps, the tests that cover it, and the success
