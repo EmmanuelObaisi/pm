@@ -59,7 +59,7 @@ Coverage thresholds are enforced in `vitest.config.ts` (90% statements/lines, 85
 
 Backend (run from `backend/`, using the project's Python — a `.venv` exists at the repo root):
 ```
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # requirements.txt is runtime only, used by Docker
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 pytest                          # all backend tests, with coverage
 pytest tests/test_cards.py      # single file

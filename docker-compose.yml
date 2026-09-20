@@ -8,4 +8,14 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Without this every deployment signs tokens with the same published
+      # default, so anyone could forge one. Set it in .env.
+      JWT_SECRET: ${JWT_SECRET:-}
+      PM_DB_PATH: /data/project_management.db
+    volumes:
+      # Keep accounts and boards across rebuilds.
+      - pm-data:/data
     restart: unless-stopped
+
+volumes:
+  pm-data:
