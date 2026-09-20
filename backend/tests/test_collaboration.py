@@ -49,6 +49,30 @@ def test_member_can_be_removed(alice, bob, shared):
     assert bob.get(f"/api/boards/{shared['id']}").status_code == 404
 
 
+def test_removing_a_member_unassigns_their_cards(alice, bob, shared):
+    column_id = shared["columns"][0]["id"]
+    add_card(alice, shared["id"], column_id, "Bob's task", assignee_id=bob.id)
+    add_card(alice, shared["id"], column_id, "Nobody's task")
+
+    alice.delete(f"/api/boards/{shared['id']}/members/{bob.id}")
+
+    after = alice.get(f"/api/boards/{shared['id']}").json()
+    assert [card["assignee_id"] for card in after["cards"]] == [None, None]
+    assert [card["assignee_username"] for card in after["cards"]] == [None, None]
+    assert after["stats"]["cards_by_assignee"] == {"unassigned": 2}
+
+
+def test_removing_a_member_leaves_other_boards_alone(alice, bob, shared):
+    other = alice.create_board("Other")
+    alice.post(f"/api/boards/{other['id']}/members", json={"username": "bob"})
+    add_card(alice, other["id"], other["columns"][0]["id"], "Still bob's", assignee_id=bob.id)
+
+    alice.delete(f"/api/boards/{shared['id']}/members/{bob.id}")
+
+    untouched = alice.get(f"/api/boards/{other['id']}").json()
+    assert untouched["cards"][0]["assignee_username"] == "bob"
+
+
 def test_adding_an_unknown_user_is_404(alice, board):
     response = alice.post(
         f"/api/boards/{board['id']}/members", json={"username": "ghost"}

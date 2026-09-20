@@ -281,6 +281,12 @@ def remove_member(connection: sqlite3.Connection, board_id: int, user_id: int) -
         "DELETE FROM board_members WHERE board_id = ? AND user_id = ?",
         (board_id, user_id),
     )
+    # Leaving them on their cards would show a non-member as the assignee and
+    # count them in the stats, and the assignee picker only offers members.
+    connection.execute(
+        "UPDATE cards SET assignee_id = NULL, updated_at = ? WHERE board_id = ? AND assignee_id = ?",
+        (now_iso(), board_id, user_id),
+    )
 
 
 # --------------------------------------------------------------------------
