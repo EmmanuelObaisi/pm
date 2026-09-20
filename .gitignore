@@ -182,3 +182,6 @@ frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
 backend/e2e.db
+
+# Claude Code session state
+.claude/
