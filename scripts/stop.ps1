@@ -7,9 +7,9 @@ if (-not $processes) {
 }
 
 foreach ($process in $processes) {
-    $pid = $process.OwningProcess
-    if ($pid) {
-        Stop-Process -Id $pid -Force
+    $processId = $process.OwningProcess
+    if ($processId) {
+        Stop-Process -Id $processId -Force
     }
 }
 
