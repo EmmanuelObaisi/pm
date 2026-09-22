@@ -17,6 +17,9 @@ port every backend start script uses.
   encoding, `resolveDrop` (which column and slot a drop maps to),
   `withCardMoved` (the optimistic local move), filtering, and the small
   presentation helpers.
+- `src/lib/errors.ts` holds `errorMessage(caught, fallback)`, the one place
+  that turns a rejected request into the line the user sees. It lives apart
+  from `api.ts` because the component tests mock that whole module.
 - `src/lib/session.ts` persists the session in localStorage. Every access is
   wrapped, because storage can be blocked or absent.
 - `src/components/Workspace.tsx` is the root: it restores and revalidates a

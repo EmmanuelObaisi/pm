@@ -2,7 +2,7 @@
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 from fastapi import Depends, HTTPException, Path
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -54,18 +54,26 @@ class BoardContext:
     user: sqlite3.Row
     connection: sqlite3.Connection
 
+    def detail(self, include_archived: bool = False) -> dict[str, Any]:
+        """The whole-board payload that every mutating route returns."""
+        return repository.board_detail(
+            self.connection, self.board_id, self.role, include_archived
+        )
+
+    def log(self, action: str, summary: str) -> None:
+        repository.log_activity(
+            self.connection, self.board_id, self.user["id"], action, summary
+        )
+
 
 def resolve_board(
     connection: sqlite3.Connection, user: sqlite3.Row, board_id: int, minimum: str
 ) -> BoardContext:
-    board = repository.get_board(connection, board_id)
-    if board is None:
-        raise HTTPException(status_code=404, detail="Board not found")
-
+    # A board that does not exist has no members either, so both cases answer
+    # 404 here and board existence never leaks to a non-member.
     role = repository.get_member_role(connection, board_id, user["id"])
     if role is None:
         raise HTTPException(status_code=404, detail="Board not found")
-
     if ROLE_RANK[role] < ROLE_RANK[minimum]:
         raise HTTPException(status_code=403, detail=f"Requires {minimum} access")
     return BoardContext(board_id=board_id, role=role, user=user, connection=connection)
@@ -84,43 +92,50 @@ def board_access(minimum: str):
     return dependency
 
 
-def resolve_card(
-    connection: sqlite3.Connection, user: sqlite3.Row, card_id: int, minimum: str
-) -> tuple[sqlite3.Row, BoardContext]:
-    card = repository.get_card(connection, card_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="Card not found")
-    context = resolve_board(connection, user, card["board_id"], minimum)
-    return card, context
-
-
 def card_access(minimum: str):
+    """Build a dependency resolving the path's card and its board access."""
+
     def dependency(
         card_id: int = Path(...),
         connection: sqlite3.Connection = Depends(get_db),
         user: sqlite3.Row = Depends(get_current_user),
     ) -> tuple[sqlite3.Row, BoardContext]:
-        return resolve_card(connection, user, card_id, minimum)
+        card = repository.get_card(connection, card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return card, resolve_board(connection, user, card["board_id"], minimum)
 
     return dependency
 
 
-def resolve_column(
-    connection: sqlite3.Connection, user: sqlite3.Row, column_id: int, minimum: str
-) -> tuple[sqlite3.Row, BoardContext]:
-    column = repository.get_column(connection, column_id)
-    if column is None:
-        raise HTTPException(status_code=404, detail="Column not found")
-    context = resolve_board(connection, user, column["board_id"], minimum)
-    return column, context
-
-
 def column_access(minimum: str):
+    """Build a dependency resolving the path's column and its board access."""
+
     def dependency(
         column_id: int = Path(...),
         connection: sqlite3.Connection = Depends(get_db),
         user: sqlite3.Row = Depends(get_current_user),
     ) -> tuple[sqlite3.Row, BoardContext]:
-        return resolve_column(connection, user, column_id, minimum)
+        column = repository.get_column(connection, column_id)
+        if column is None:
+            raise HTTPException(status_code=404, detail="Column not found")
+        return column, resolve_board(connection, user, column["board_id"], minimum)
+
+    return dependency
+
+
+def checklist_access(minimum: str):
+    """Build a dependency resolving the path's checklist item and its board."""
+
+    def dependency(
+        item_id: int = Path(...),
+        connection: sqlite3.Connection = Depends(get_db),
+        user: sqlite3.Row = Depends(get_current_user),
+    ) -> tuple[sqlite3.Row, BoardContext]:
+        item = repository.get_checklist_item(connection, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Checklist item not found")
+        card = repository.get_card(connection, item["card_id"])
+        return item, resolve_board(connection, user, card["board_id"], minimum)
 
     return dependency

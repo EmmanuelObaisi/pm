@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import type { BoardSummary } from "@/lib/types";
 import { Button, EmptyState, ErrorText, Field, Input, Modal, Spinner } from "@/components/ui";
 
@@ -27,7 +28,7 @@ export const BoardList = ({ onOpen }: { onOpen: (boardId: number) => void }) => 
       setBoards(await api.fetchBoards(includeArchived));
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load boards");
+      setError(errorMessage(caught, "Could not load boards"));
       setBoards([]);
     }
   }, [includeArchived]);
@@ -50,22 +51,22 @@ export const BoardList = ({ onOpen }: { onOpen: (boardId: number) => void }) => 
       setDescription("");
       onOpen(board.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create the board");
+      setError(errorMessage(caught, "Could not create the board"));
     } finally {
       setBusy(false);
     }
   };
 
-  const setArchived = async (board: BoardSummary, archived: boolean) => {
+  const setBoardArchived = async (board: BoardSummary, archived: boolean) => {
     try {
       await api.updateBoard(board.id, { archived });
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update the board");
+      setError(errorMessage(caught, "Could not update the board"));
     }
   };
 
-  const remove = async (board: BoardSummary) => {
+  const removeBoard = async (board: BoardSummary) => {
     if (!window.confirm(`Delete "${board.name}" and everything on it?`)) {
       return;
     }
@@ -73,7 +74,7 @@ export const BoardList = ({ onOpen }: { onOpen: (boardId: number) => void }) => 
       await api.deleteBoard(board.id);
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not delete the board");
+      setError(errorMessage(caught, "Could not delete the board"));
     }
   };
 
@@ -156,11 +157,11 @@ export const BoardList = ({ onOpen }: { onOpen: (boardId: number) => void }) => 
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setArchived(board, !board.archived)}
+                      onClick={() => setBoardArchived(board, !board.archived)}
                     >
                       {board.archived ? "Restore" : "Archive"}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => remove(board)}>
+                    <Button variant="ghost" size="sm" onClick={() => removeBoard(board)}>
                       Delete
                     </Button>
                   </div>

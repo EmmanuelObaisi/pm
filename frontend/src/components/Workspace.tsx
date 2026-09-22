@@ -18,7 +18,9 @@ export const Workspace = () => {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>({ name: "boards" });
 
-  // Restore a stored session, and make sure its token is still good.
+  // Restore a stored session, and make sure its token is still good. Becoming
+  // ready waits on a promise even when there is nothing stored, because
+  // setting state straight from an effect body cascades renders.
   useEffect(() => {
     let cancelled = false;
     const stored = loadSession();

@@ -204,6 +204,13 @@ def _assignee_id(
     return user["id"]
 
 
+def _required_text(operation: dict[str, Any], field: str) -> str:
+    value = (operation.get(field) or "").strip()
+    if not value:
+        raise OperationError(f"{field} is required")
+    return value
+
+
 def apply_operation(
     connection: sqlite3.Connection,
     board_id: int,
@@ -212,22 +219,17 @@ def apply_operation(
 ) -> str:
     """Apply one operation and return a human-readable summary."""
     op = operation.get("op")
-    if op not in OPERATIONS:
-        raise OperationError(f"unknown operation {op}")
 
     if op == "create_card":
         column = _column_on_board(connection, board_id, operation.get("column_id"))
-        title = (operation.get("title") or "").strip()
-        if not title:
-            raise OperationError("title is required")
-        priority = operation.get("priority") or "medium"
+        title = _required_text(operation, "title")
         card_id = repository.create_card(
             connection,
             board_id,
             column["id"],
             title,
             operation.get("details") or "",
-            priority,
+            operation.get("priority") or "medium",
             _assignee_id(connection, board_id, operation.get("assignee")),
             operation.get("due_date"),
             None,
@@ -274,17 +276,13 @@ def apply_operation(
         return f"archived card {card['title']}"
 
     if op == "create_column":
-        title = (operation.get("title") or "").strip()
-        if not title:
-            raise OperationError("title is required")
+        title = _required_text(operation, "title")
         repository.create_column(connection, board_id, title, None)
         return f"created column {title}"
 
     if op == "rename_column":
         column = _column_on_board(connection, board_id, operation.get("column_id"))
-        title = (operation.get("title") or "").strip()
-        if not title:
-            raise OperationError("title is required")
+        title = _required_text(operation, "title")
         repository.update_column(connection, column["id"], title, None, False)
         return f"renamed column {column['title']} to {title}"
 
@@ -293,12 +291,13 @@ def apply_operation(
         repository.delete_column(connection, column["id"])
         return f"deleted column {column['title']}"
 
-    card = _card_on_board(connection, board_id, operation.get("card_id"))
-    body = (operation.get("body") or "").strip()
-    if not body:
-        raise OperationError("body is required")
-    repository.create_comment(connection, card["id"], actor_id, body)
-    return f"commented on {card['title']}"
+    if op == "add_comment":
+        card = _card_on_board(connection, board_id, operation.get("card_id"))
+        body = _required_text(operation, "body")
+        repository.create_comment(connection, card["id"], actor_id, body)
+        return f"commented on {card['title']}"
+
+    raise OperationError(f"unknown operation {op}")
 
 
 def apply_operations(

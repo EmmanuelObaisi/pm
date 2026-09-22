@@ -1,89 +1,62 @@
 $ErrorActionPreference = "Stop"
 
-function Get-FreePort {
-    param(
-        [int]$StartPort = 8000,
-        [int]$EndPort = 8999
-    )
-
-    for ($port = $StartPort; $port -le $EndPort; $port++) {
-        $inUse = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-        if (-not $inUse) {
-            return $port
-        }
-    }
-
-    throw "No free port available in range $StartPort-$EndPort"
-}
-
-$projectRoot = "C:\Users\shola\Projects\pm"
+$projectRoot = $PSScriptRoot
 $backendRoot = Join-Path $projectRoot "backend"
 $frontendRoot = Join-Path $projectRoot "frontend"
-$pythonExe = "C:\Users\shola\AppData\Local\Programs\Python\Python314\python.exe"
-$backendPort = Get-FreePort -StartPort 8000 -EndPort 8099
-$frontendPort = Get-FreePort -StartPort 3000 -EndPort 3099
 
-if (-not (Test-Path $pythonExe)) {
-    throw "Python executable not found at $pythonExe"
+function Test-PortAvailable {
+    param([int]$Port)
+
+    if (Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue) {
+        throw "Port $Port is already in use. Stop the existing server before starting development mode."
+    }
 }
 
-if (-not (Test-Path $frontendRoot)) {
-    throw "Frontend folder not found at $frontendRoot"
+foreach ($command in @("python", "npm.cmd")) {
+    if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
+        throw "Required command '$command' was not found on PATH."
+    }
 }
 
-if (-not (Test-Path $backendRoot)) {
-    throw "Backend folder not found at $backendRoot"
-}
+Test-PortAvailable 8000
+Test-PortAvailable 3000
 
-$lockPath = Join-Path $frontendRoot ".next\dev\lock"
-if (Test-Path $lockPath) {
-    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
-    Write-Host "Cleared stale Next.js lock: $lockPath"
-}
-
-Write-Host "Starting backend and frontend together in one terminal session..."
-Write-Host "Backend port: $backendPort"
-Write-Host "Frontend port: $frontendPort"
+Write-Host "Starting the backend at http://localhost:8000"
+Write-Host "Starting the frontend at http://localhost:3000"
+Write-Host "Press Ctrl+C to stop both servers."
 
 $backendJob = Start-Job -Name "pm-backend" -ScriptBlock {
-    param($root, $python, $port)
-    Set-Location $root
-    & $python -m uvicorn app.main:app --reload --host 0.0.0.0 --port $port *>&1
-} -ArgumentList $backendRoot, $pythonExe, $backendPort
+    param($directory)
+    Set-Location $directory
+    python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 *>&1
+} -ArgumentList $backendRoot
 
 $frontendJob = Start-Job -Name "pm-frontend" -ScriptBlock {
-    param($root, $port)
-    Set-Location $root
-    Remove-Item "$root\.next\dev\lock" -Force -ErrorAction SilentlyContinue
-    npm.cmd run dev -- --port $port *>&1
-} -ArgumentList $frontendRoot, $frontendPort
+    param($directory)
+    Set-Location $directory
+    npm.cmd run dev -- --port 3000 *>&1
+} -ArgumentList $frontendRoot
 
 try {
     while ($true) {
-        $backendOutput = Receive-Job -Name "pm-backend" -Keep -ErrorAction SilentlyContinue
-        foreach ($line in @($backendOutput)) {
-            if ($line) { Write-Host "[backend] $line" }
+        foreach ($job in @($backendJob, $frontendJob)) {
+            Receive-Job -Job $job -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[$($job.Name)] $_"
+            }
         }
 
-        $frontendOutput = Receive-Job -Name "pm-frontend" -Keep -ErrorAction SilentlyContinue
-        foreach ($line in @($frontendOutput)) {
-            if ($line) { Write-Host "[frontend] $line" }
+        if ($backendJob.State -ne "Running" -or $frontendJob.State -ne "Running") {
+            throw "A development server stopped unexpectedly."
         }
 
-        if ($backendJob.State -ne "Running" -and $frontendJob.State -ne "Running") {
-            break
-        }
-
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Seconds 1
     }
 }
 finally {
-    if ($backendJob.State -eq "Running") { Stop-Job -Name "pm-backend" }
-    if ($frontendJob.State -eq "Running") { Stop-Job -Name "pm-frontend" }
-    Remove-Job -Name "pm-backend" -Force -ErrorAction SilentlyContinue
-    Remove-Job -Name "pm-frontend" -Force -ErrorAction SilentlyContinue
+    foreach ($job in @($backendJob, $frontendJob)) {
+        if ($job.State -eq "Running") {
+            Stop-Job -Job $job
+        }
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
 }
-
-Write-Host "Backend: http://localhost:$backendPort"
-Write-Host "Frontend: http://localhost:$frontendPort"
-Write-Host "Use user / password to sign in"

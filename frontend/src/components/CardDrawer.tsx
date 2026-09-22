@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import * as api from "@/lib/api";
 import { formatDate } from "@/lib/board";
+import { errorMessage } from "@/lib/errors";
 import type { Board, Comment, Priority, User } from "@/lib/types";
 import { PRIORITIES } from "@/lib/types";
 import { Badge, Button, ErrorText, Field, Input, Spinner } from "@/components/ui";
@@ -70,7 +71,7 @@ export const CardDrawer = ({
       onBoardChange(await action());
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "That did not work");
+      setError(errorMessage(caught, "That did not work"));
     }
   };
 
@@ -87,7 +88,7 @@ export const CardDrawer = ({
       setCommentBody("");
       onBoardChange(await api.fetchBoard(board.id));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not post the comment");
+      setError(errorMessage(caught, "Could not post the comment"));
     }
   };
 
@@ -96,7 +97,7 @@ export const CardDrawer = ({
       setComments(await api.deleteComment(commentId));
       onBoardChange(await api.fetchBoard(board.id));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not delete the comment");
+      setError(errorMessage(caught, "Could not delete the comment"));
     }
   };
 
@@ -128,7 +129,11 @@ export const CardDrawer = ({
             value={title}
             disabled={!editable}
             onChange={(event) => setTitle(event.target.value)}
-            onBlur={() => title.trim() && title !== card.title && saveField({ title: title.trim() })}
+            onBlur={() => {
+              if (title.trim() && title !== card.title) {
+                void saveField({ title: title.trim() });
+              }
+            }}
           />
         </Field>
 
@@ -137,7 +142,11 @@ export const CardDrawer = ({
             value={details}
             disabled={!editable}
             onChange={(event) => setDetails(event.target.value)}
-            onBlur={() => details !== card.details && saveField({ details })}
+            onBlur={() => {
+              if (details !== card.details) {
+                void saveField({ details });
+              }
+            }}
             rows={4}
             className="w-full rounded-lg border border-[var(--stroke)] px-3 py-2 text-sm outline-none focus:border-[var(--primary-blue)]"
           />

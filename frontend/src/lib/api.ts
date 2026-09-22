@@ -50,12 +50,9 @@ const readError = async (response: Response) => {
   return `Request failed (${response.status})`;
 };
 
-const request = async <T>(
-  path: string,
-  options: { method?: string; body?: unknown } = {}
-): Promise<T> => {
+const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
   const headers: Record<string, string> = {};
-  if (options.body !== undefined) {
+  if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
   if (authToken) {
@@ -63,9 +60,9 @@ const request = async <T>(
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method ?? "GET",
+    method,
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -78,6 +75,11 @@ const request = async <T>(
   return response.json() as Promise<T>;
 };
 
+const get = <T>(path: string) => request<T>("GET", path);
+const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
+const patch = <T>(path: string, body: unknown) => request<T>("PATCH", path, body);
+const del = <T>(path: string) => request<T>("DELETE", path);
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -87,123 +89,103 @@ export const register = (payload: {
   password: string;
   email?: string;
   full_name?: string;
-}) => request<Session>("/auth/register", { method: "POST", body: payload });
+}) => post<Session>("/auth/register", payload);
 
 export const login = (username: string, password: string) =>
-  request<Session>("/auth/login", { method: "POST", body: { username, password } });
+  post<Session>("/auth/login", { username, password });
 
-export const fetchMe = () => request<User>("/auth/me");
+export const fetchMe = () => get<User>("/auth/me");
 
 export const updateProfile = (payload: { email?: string; full_name?: string }) =>
-  request<User>("/auth/me", { method: "PATCH", body: payload });
+  patch<User>("/auth/me", payload);
 
 export const changePassword = (current_password: string, new_password: string) =>
-  request<{ status: string }>("/auth/password", {
-    method: "POST",
-    body: { current_password, new_password },
-  });
+  post<{ status: string }>("/auth/password", { current_password, new_password });
 
-export const fetchDirectory = () => request<DirectoryUser[]>("/auth/users");
+export const fetchDirectory = () => get<DirectoryUser[]>("/auth/users");
 
-export const fetchAdminUsers = () => request<User[]>("/admin/users");
+export const fetchAdminUsers = () => get<User[]>("/admin/users");
 
 export const updateAdminUser = (
   userId: number,
   payload: { is_active?: boolean; is_admin?: boolean }
-) => request<User>(`/admin/users/${userId}`, { method: "PATCH", body: payload });
+) => patch<User>(`/admin/users/${userId}`, payload);
 
 // ---------------------------------------------------------------------------
 // Boards
 // ---------------------------------------------------------------------------
 
 export const fetchBoards = (includeArchived = false) =>
-  request<BoardSummary[]>(`/boards?include_archived=${includeArchived}`);
+  get<BoardSummary[]>(`/boards?include_archived=${includeArchived}`);
 
 export const createBoard = (payload: {
   name: string;
   description?: string;
   template?: "kanban" | "empty";
-}) => request<Board>("/boards", { method: "POST", body: payload });
+}) => post<Board>("/boards", payload);
 
 export const fetchBoard = (boardId: number, includeArchived = false) =>
-  request<Board>(`/boards/${boardId}?include_archived=${includeArchived}`);
+  get<Board>(`/boards/${boardId}?include_archived=${includeArchived}`);
 
 export const updateBoard = (
   boardId: number,
   payload: { name?: string; description?: string; archived?: boolean }
-) => request<Board>(`/boards/${boardId}`, { method: "PATCH", body: payload });
+) => patch<Board>(`/boards/${boardId}`, payload);
 
-export const deleteBoard = (boardId: number) =>
-  request<void>(`/boards/${boardId}`, { method: "DELETE" });
+export const deleteBoard = (boardId: number) => del<void>(`/boards/${boardId}`);
 
-export const fetchStats = (boardId: number) =>
-  request<BoardStats>(`/boards/${boardId}/stats`);
+export const fetchStats = (boardId: number) => get<BoardStats>(`/boards/${boardId}/stats`);
 
 export const fetchActivity = (boardId: number, limit = 50) =>
-  request<ActivityEntry[]>(`/boards/${boardId}/activity?limit=${limit}`);
+  get<ActivityEntry[]>(`/boards/${boardId}/activity?limit=${limit}`);
 
 // ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
 
 export const fetchMembers = (boardId: number) =>
-  request<Member[]>(`/boards/${boardId}/members`);
+  get<Member[]>(`/boards/${boardId}/members`);
 
 export const addMember = (boardId: number, username: string, role: "editor" | "viewer") =>
-  request<Member[]>(`/boards/${boardId}/members`, {
-    method: "POST",
-    body: { username, role },
-  });
+  post<Member[]>(`/boards/${boardId}/members`, { username, role });
 
 export const updateMember = (
   boardId: number,
   userId: number,
   role: "editor" | "viewer"
-) =>
-  request<Member[]>(`/boards/${boardId}/members/${userId}`, {
-    method: "PATCH",
-    body: { role },
-  });
+) => patch<Member[]>(`/boards/${boardId}/members/${userId}`, { role });
 
 export const removeMember = (boardId: number, userId: number) =>
-  request<Member[]>(`/boards/${boardId}/members/${userId}`, { method: "DELETE" });
+  del<Member[]>(`/boards/${boardId}/members/${userId}`);
 
 // ---------------------------------------------------------------------------
 // Columns and labels
 // ---------------------------------------------------------------------------
 
 export const createColumn = (boardId: number, title: string, wip_limit?: number | null) =>
-  request<Board>(`/boards/${boardId}/columns`, {
-    method: "POST",
-    body: { title, wip_limit: wip_limit ?? null },
-  });
+  post<Board>(`/boards/${boardId}/columns`, { title, wip_limit: wip_limit ?? null });
 
 export const updateColumn = (
   columnId: number,
   payload: { title?: string; wip_limit?: number | null; clear_wip_limit?: boolean }
-) => request<Board>(`/columns/${columnId}`, { method: "PATCH", body: payload });
+) => patch<Board>(`/columns/${columnId}`, payload);
 
-export const deleteColumn = (columnId: number) =>
-  request<Board>(`/columns/${columnId}`, { method: "DELETE" });
+export const deleteColumn = (columnId: number) => del<Board>(`/columns/${columnId}`);
 
 export const moveColumn = (columnId: number, position: number) =>
-  request<Board>(`/columns/${columnId}/move`, { method: "POST", body: { position } });
+  post<Board>(`/columns/${columnId}/move`, { position });
 
 export const createLabel = (boardId: number, name: string, color: string) =>
-  request<Board>(`/boards/${boardId}/labels`, { method: "POST", body: { name, color } });
+  post<Board>(`/boards/${boardId}/labels`, { name, color });
 
 export const updateLabel = (
   boardId: number,
   labelId: number,
   payload: { name?: string; color?: string }
-) =>
-  request<Board>(`/boards/${boardId}/labels/${labelId}`, {
-    method: "PATCH",
-    body: payload,
-  });
+) => patch<Board>(`/boards/${boardId}/labels/${labelId}`, payload);
 
 export const deleteLabel = (boardId: number, labelId: number) =>
-  request<Board>(`/boards/${boardId}/labels/${labelId}`, { method: "DELETE" });
+  del<Board>(`/boards/${boardId}/labels/${labelId}`);
 
 // ---------------------------------------------------------------------------
 // Cards
@@ -235,51 +217,46 @@ export type CardUpdatePayload = {
 };
 
 export const createCard = (boardId: number, payload: CardCreatePayload) =>
-  request<Board>(`/boards/${boardId}/cards`, { method: "POST", body: payload });
+  post<Board>(`/boards/${boardId}/cards`, payload);
 
-export const fetchCard = (cardId: number) => request<CardDetail>(`/cards/${cardId}`);
+export const fetchCard = (cardId: number) => get<CardDetail>(`/cards/${cardId}`);
 
 export const updateCard = (cardId: number, payload: CardUpdatePayload) =>
-  request<Board>(`/cards/${cardId}`, { method: "PATCH", body: payload });
+  patch<Board>(`/cards/${cardId}`, payload);
 
-export const deleteCard = (cardId: number) =>
-  request<Board>(`/cards/${cardId}`, { method: "DELETE" });
+export const deleteCard = (cardId: number) => del<Board>(`/cards/${cardId}`);
 
 export const moveCard = (cardId: number, column_id: number, position: number) =>
-  request<Board>(`/cards/${cardId}/move`, {
-    method: "POST",
-    body: { column_id, position },
-  });
+  post<Board>(`/cards/${cardId}/move`, { column_id, position });
 
 export const addChecklistItem = (cardId: number, text: string) =>
-  request<Board>(`/cards/${cardId}/checklist`, { method: "POST", body: { text } });
+  post<Board>(`/cards/${cardId}/checklist`, { text });
 
 export const updateChecklistItem = (
   itemId: number,
   payload: { text?: string; done?: boolean }
-) => request<Board>(`/checklist/${itemId}`, { method: "PATCH", body: payload });
+) => patch<Board>(`/checklist/${itemId}`, payload);
 
-export const deleteChecklistItem = (itemId: number) =>
-  request<Board>(`/checklist/${itemId}`, { method: "DELETE" });
+export const deleteChecklistItem = (itemId: number) => del<Board>(`/checklist/${itemId}`);
 
 export const fetchComments = (cardId: number) =>
-  request<Comment[]>(`/cards/${cardId}/comments`);
+  get<Comment[]>(`/cards/${cardId}/comments`);
 
 export const addComment = (cardId: number, body: string) =>
-  request<Comment[]>(`/cards/${cardId}/comments`, { method: "POST", body: { body } });
+  post<Comment[]>(`/cards/${cardId}/comments`, { body });
 
 export const deleteComment = (commentId: number) =>
-  request<Comment[]>(`/comments/${commentId}`, { method: "DELETE" });
+  del<Comment[]>(`/comments/${commentId}`);
 
 // ---------------------------------------------------------------------------
 // AI
 // ---------------------------------------------------------------------------
 
 export const askAI = (boardId: number, question: string) =>
-  request<AIResult>(`/boards/${boardId}/ai`, { method: "POST", body: { question } });
+  post<AIResult>(`/boards/${boardId}/ai`, { question });
 
 export const fetchAIMessages = (boardId: number) =>
-  request<AIMessage[]>(`/boards/${boardId}/ai/messages`);
+  get<AIMessage[]>(`/boards/${boardId}/ai/messages`);
 
 export const clearAIMessages = (boardId: number) =>
-  request<void>(`/boards/${boardId}/ai/messages`, { method: "DELETE" });
+  del<void>(`/boards/${boardId}/ai/messages`);

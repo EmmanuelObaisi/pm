@@ -22,13 +22,11 @@ from ..models import (
 router = APIRouter(prefix="/api", tags=["boards"])
 
 
-def _detail(context: BoardContext, include_archived: bool = False) -> dict[str, Any]:
-    board = repository.board_detail(
-        context.connection, context.board_id, context.role, include_archived
-    )
-    if board is None:
-        raise HTTPException(status_code=404, detail="Board not found")
-    return board
+def _require_label(context: BoardContext, label_id: int) -> sqlite3.Row:
+    label = repository.get_label(context.connection, label_id)
+    if label is None or label["board_id"] != context.board_id:
+        raise HTTPException(status_code=404, detail="Label not found")
+    return label
 
 
 # --------------------------------------------------------------------------
@@ -62,7 +60,7 @@ def read_board(
     include_archived: bool = False,
     context: BoardContext = Depends(board_access("viewer")),
 ) -> dict[str, Any]:
-    return _detail(context, include_archived)
+    return context.detail(include_archived)
 
 
 @router.patch("/boards/{board_id}")
@@ -76,14 +74,8 @@ def patch_board(
         payload.description,
         payload.archived,
     )
-    repository.log_activity(
-        context.connection,
-        context.board_id,
-        context.user["id"],
-        "board.update",
-        "updated board settings",
-    )
-    return _detail(context)
+    context.log("board.update", "updated board settings")
+    return context.detail()
 
 
 @router.delete("/boards/{board_id}", status_code=204)
@@ -126,13 +118,7 @@ def add_member(
         raise HTTPException(status_code=400, detail="You already own this board")
 
     repository.add_member(context.connection, context.board_id, target["id"], payload.role)
-    repository.log_activity(
-        context.connection,
-        context.board_id,
-        context.user["id"],
-        "member.add",
-        f"added {target['username']} as {payload.role}",
-    )
+    context.log("member.add", f"added {target['username']} as {payload.role}")
     return repository.list_members(context.connection, context.board_id)
 
 
@@ -163,13 +149,7 @@ def remove_member(
         raise HTTPException(status_code=400, detail="The board owner cannot be removed")
 
     repository.remove_member(context.connection, context.board_id, user_id)
-    repository.log_activity(
-        context.connection,
-        context.board_id,
-        context.user["id"],
-        "member.remove",
-        "removed a member",
-    )
+    context.log("member.remove", "removed a member")
     return repository.list_members(context.connection, context.board_id)
 
 
@@ -185,14 +165,8 @@ def add_column(
     repository.create_column(
         context.connection, context.board_id, payload.title.strip(), payload.wip_limit
     )
-    repository.log_activity(
-        context.connection,
-        context.board_id,
-        context.user["id"],
-        "column.create",
-        f"added column {payload.title.strip()}",
-    )
-    return _detail(context)
+    context.log("column.create", f"added column {payload.title.strip()}")
+    return context.detail()
 
 
 @router.patch("/columns/{column_id}")
@@ -209,7 +183,7 @@ def patch_column(
         payload.clear_wip_limit,
     )
     repository.touch_board(context.connection, context.board_id)
-    return _detail(context)
+    return context.detail()
 
 
 @router.delete("/columns/{column_id}")
@@ -218,15 +192,9 @@ def remove_column(
 ) -> dict[str, Any]:
     column, context = access
     repository.delete_column(context.connection, column["id"])
-    repository.log_activity(
-        context.connection,
-        context.board_id,
-        context.user["id"],
-        "column.delete",
-        f"deleted column {column['title']}",
-    )
+    context.log("column.delete", f"deleted column {column['title']}")
     repository.touch_board(context.connection, context.board_id)
-    return _detail(context)
+    return context.detail()
 
 
 @router.post("/columns/{column_id}/move")
@@ -236,7 +204,7 @@ def reorder_column(
 ) -> dict[str, Any]:
     column, context = access
     repository.move_column(context.connection, column["id"], payload.position)
-    return _detail(context)
+    return context.detail()
 
 
 # --------------------------------------------------------------------------
@@ -251,7 +219,7 @@ def add_label(
     repository.create_label(
         context.connection, context.board_id, payload.name.strip(), payload.color
     )
-    return _detail(context)
+    return context.detail()
 
 
 @router.patch("/boards/{board_id}/labels/{label_id}")
@@ -260,24 +228,20 @@ def patch_label(
     payload: LabelUpdate,
     context: BoardContext = Depends(board_access("editor")),
 ) -> dict[str, Any]:
-    label = repository.get_label(context.connection, label_id)
-    if label is None or label["board_id"] != context.board_id:
-        raise HTTPException(status_code=404, detail="Label not found")
+    _require_label(context, label_id)
     repository.update_label(
         context.connection,
         label_id,
         payload.name.strip() if payload.name is not None else None,
         payload.color,
     )
-    return _detail(context)
+    return context.detail()
 
 
 @router.delete("/boards/{board_id}/labels/{label_id}")
 def remove_label(
     label_id: int, context: BoardContext = Depends(board_access("editor"))
 ) -> dict[str, Any]:
-    label = repository.get_label(context.connection, label_id)
-    if label is None or label["board_id"] != context.board_id:
-        raise HTTPException(status_code=404, detail="Label not found")
+    _require_label(context, label_id)
     repository.delete_label(context.connection, label_id)
-    return _detail(context)
+    return context.detail()

@@ -12,7 +12,11 @@ from .routers import ai, auth, boards, cards
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Make sure a real server always has the demo account to sign in with."""
+    """Create the schema and seed the demo account a real server signs in with.
+
+    This runs on startup and deliberately not at import time: importing this
+    module must not touch, or migrate, a real database.
+    """
     db.init_db()
     with db.connect() as connection:
         repository.ensure_demo_user(connection)
@@ -37,9 +41,6 @@ def health() -> dict[str, str]:
 def hello() -> dict[str, str]:
     return {"message": "hello world"}
 
-
-# The schema is created by the lifespan handler above, not at import time:
-# importing this module must not touch, or migrate, a real database.
 
 if FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")

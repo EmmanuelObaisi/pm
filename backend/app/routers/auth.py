@@ -38,7 +38,7 @@ def register(
         raise HTTPException(status_code=409, detail="Username is already taken")
 
     # The first account to exist owns the instance, so it gets admin rights.
-    is_first = connection.execute("SELECT COUNT(*) AS total FROM users").fetchone()["total"] == 0
+    is_first = repository.count_users(connection) == 0
     user = repository.create_user(
         connection,
         username,
@@ -98,13 +98,7 @@ def search_users(
     connection: sqlite3.Connection = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Directory of active accounts, used when adding board members."""
-    rows = connection.execute(
-        "SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY username"
-    ).fetchall()
-    return [
-        {"id": row["id"], "username": row["username"], "full_name": row["full_name"]}
-        for row in rows
-    ]
+    return repository.list_active_users(connection)
 
 
 @admin_router.get("/users")

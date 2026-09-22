@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as api from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import type { AIMessage, Board } from "@/lib/types";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 
@@ -65,7 +66,7 @@ export const ChatPanel = ({
         setError(`The assistant could not do everything: ${result.errors.join("; ")}`);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The assistant is unavailable");
+      setError(errorMessage(caught, "The assistant is unavailable"));
       setMessages(await api.fetchAIMessages(board.id).catch(() => messages ?? []));
     } finally {
       setBusy(false);
@@ -78,7 +79,7 @@ export const ChatPanel = ({
       setMessages([]);
       setApplied([]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not clear the history");
+      setError(errorMessage(caught, "Could not clear the history"));
     }
   };
 

@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from .. import ai, repository
-from ..deps import BoardContext, board_access, get_current_user, get_db
+from ..deps import BoardContext, board_access, get_current_user
 from ..models import AIRequest
 
 router = APIRouter(prefix="/api", tags=["ai"])
@@ -29,7 +29,7 @@ def ask_assistant(
     payload: AIRequest, context: BoardContext = Depends(board_access("editor"))
 ) -> dict[str, Any]:
     connection = context.connection
-    board = repository.board_detail(connection, context.board_id, context.role)
+    board = context.detail()
     history = repository.list_ai_messages(connection, context.board_id, limit=20)
 
     result = ai.ask(connection, board, context.user["id"], payload.question, history)
@@ -45,7 +45,7 @@ def ask_assistant(
         "reply": result["reply"],
         "applied": result["applied"],
         "errors": result["errors"],
-        "board": repository.board_detail(connection, context.board_id, context.role),
+        "board": context.detail(),
     }
 
 
@@ -53,7 +53,6 @@ def ask_assistant(
 def ai_test(
     payload: dict[str, str],
     user: sqlite3.Row = Depends(get_current_user),
-    connection: sqlite3.Connection = Depends(get_db),
 ) -> dict[str, str]:
     """Connectivity smoke test against OpenRouter."""
     answer = ai.call_openrouter([{"role": "user", "content": payload.get("prompt", "")}])

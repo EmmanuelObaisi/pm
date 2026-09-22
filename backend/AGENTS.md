@@ -22,8 +22,10 @@ Next static export at `/`.
 - `app/repository.py` — all SQL and serialization. `board_detail()` builds the
   whole-board payload that every mutating route returns, so the client never
   has to merge partial updates.
-- `app/deps.py` — `get_db`, `get_current_user`, `get_current_admin`, and the
-  `board_access` / `card_access` / `column_access` dependency factories.
+- `app/deps.py` — `get_db`, `get_current_user`, `get_current_admin`, the
+  `board_access` / `card_access` / `column_access` / `checklist_access`
+  dependency factories, and the `BoardContext` they return, whose `detail()`
+  and `log()` are how routes answer with the board and write the activity feed.
 - `app/routers/` — `auth.py` (and the admin router), `boards.py`, `cards.py`,
   `ai.py`.
 - `app/ai.py` — the OpenRouter call and the operations the assistant can run.

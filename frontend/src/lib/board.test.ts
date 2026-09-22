@@ -10,7 +10,6 @@ import {
   emptyFilters,
   formatDate,
   hasActiveFilters,
-  isAtWipLimit,
   isNoOpMove,
   isOverdue,
   isOverWipLimit,
@@ -270,10 +269,9 @@ describe("presentation helpers", () => {
   });
 
   it("reports WIP limit state", () => {
-    expect(isAtWipLimit(makeColumn({ wip_limit: 2, card_ids: [1, 2] }))).toBe(true);
     expect(isOverWipLimit(makeColumn({ wip_limit: 2, card_ids: [1, 2] }))).toBe(false);
     expect(isOverWipLimit(makeColumn({ wip_limit: 2, card_ids: [1, 2, 3] }))).toBe(true);
-    expect(isAtWipLimit(makeColumn({ wip_limit: null, card_ids: [1, 2] }))).toBe(false);
+    expect(isOverWipLimit(makeColumn({ wip_limit: null, card_ids: [1, 2] }))).toBe(false);
   });
 
   it("maps roles to capabilities", () => {

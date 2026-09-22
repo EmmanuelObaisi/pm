@@ -27,6 +27,7 @@ import {
   withCardMoved,
   type BoardFilters,
 } from "@/lib/board";
+import { errorMessage } from "@/lib/errors";
 import type { Board, Priority, User } from "@/lib/types";
 import { PRIORITIES } from "@/lib/types";
 import { BoardColumn } from "@/components/BoardColumn";
@@ -35,6 +36,35 @@ import { CardDrawer } from "@/components/CardDrawer";
 import { ChatPanel } from "@/components/ChatPanel";
 import { BoardSidebar } from "@/components/BoardSidebar";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
+
+/** One of the board's "any X" filter dropdowns. */
+const FilterSelect = ({
+  label,
+  anyLabel,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  anyLabel: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) => (
+  <select
+    aria-label={label}
+    value={value}
+    onChange={(event) => onChange(event.target.value)}
+    className="rounded-lg border border-[var(--stroke)] bg-white px-3 py-2 text-sm"
+  >
+    <option value="">{anyLabel}</option>
+    {options.map((option) => (
+      <option key={option.value} value={option.value}>
+        {option.label}
+      </option>
+    ))}
+  </select>
+);
 
 export const BoardView = ({
   boardId,
@@ -73,7 +103,7 @@ export const BoardView = ({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Could not load the board");
+          setError(errorMessage(caught, "Could not load the board"));
         }
       });
     return () => {
@@ -87,7 +117,7 @@ export const BoardView = ({
       setBoard(await action());
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "That did not work");
+      setError(errorMessage(caught, "That did not work"));
     }
   }, []);
 
@@ -124,7 +154,7 @@ export const BoardView = ({
       setBoard(await api.moveCard(drop.cardId, drop.columnId, drop.position));
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not move the card");
+      setError(errorMessage(caught, "Could not move the card"));
       // Undo the optimistic move without clearing the message explaining why.
       setBoard(await api.fetchBoard(boardId));
     }
@@ -188,60 +218,39 @@ export const BoardView = ({
           aria-label="Search cards"
           className="w-56"
         />
-        <select
-          aria-label="Filter by assignee"
-          value={filters.assigneeId ?? ""}
-          onChange={(event) =>
-            setFilters({
-              ...filters,
-              assigneeId: event.target.value ? Number(event.target.value) : null,
-            })
+        <FilterSelect
+          label="Filter by assignee"
+          anyLabel="Any assignee"
+          value={String(filters.assigneeId ?? "")}
+          options={board.members.map((member) => ({
+            value: String(member.user_id),
+            label: member.username,
+          }))}
+          onChange={(value) =>
+            setFilters({ ...filters, assigneeId: value ? Number(value) : null })
           }
-          className="rounded-lg border border-[var(--stroke)] bg-white px-3 py-2 text-sm"
-        >
-          <option value="">Any assignee</option>
-          {board.members.map((member) => (
-            <option key={member.user_id} value={member.user_id}>
-              {member.username}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by priority"
+        />
+        <FilterSelect
+          label="Filter by priority"
+          anyLabel="Any priority"
           value={filters.priority ?? ""}
-          onChange={(event) =>
-            setFilters({
-              ...filters,
-              priority: (event.target.value || null) as Priority | null,
-            })
+          options={PRIORITIES.map((priority) => ({ value: priority, label: priority }))}
+          onChange={(value) =>
+            setFilters({ ...filters, priority: (value || null) as Priority | null })
           }
-          className="rounded-lg border border-[var(--stroke)] bg-white px-3 py-2 text-sm"
-        >
-          <option value="">Any priority</option>
-          {PRIORITIES.map((priority) => (
-            <option key={priority} value={priority}>
-              {priority}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by label"
-          value={filters.labelId ?? ""}
-          onChange={(event) =>
-            setFilters({
-              ...filters,
-              labelId: event.target.value ? Number(event.target.value) : null,
-            })
+        />
+        <FilterSelect
+          label="Filter by label"
+          anyLabel="Any label"
+          value={String(filters.labelId ?? "")}
+          options={board.labels.map((label) => ({
+            value: String(label.id),
+            label: label.name,
+          }))}
+          onChange={(value) =>
+            setFilters({ ...filters, labelId: value ? Number(value) : null })
           }
-          className="rounded-lg border border-[var(--stroke)] bg-white px-3 py-2 text-sm"
-        >
-          <option value="">Any label</option>
-          {board.labels.map((label) => (
-            <option key={label.id} value={label.id}>
-              {label.name}
-            </option>
-          ))}
-        </select>
+        />
         <Button variant="ghost" size="sm" onClick={() => setFilters(emptyFilters)}>
           Clear filters
         </Button>

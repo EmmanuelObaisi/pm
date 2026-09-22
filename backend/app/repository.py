@@ -21,14 +21,33 @@ DEFAULT_LABELS = (
 ROLE_RANK = {"viewer": 0, "editor": 1, "owner": 2}
 
 
+def _row_by_id(
+    connection: sqlite3.Connection, table: str, identifier: int
+) -> sqlite3.Row | None:
+    return connection.execute(
+        f"SELECT * FROM {table} WHERE id = ?", (identifier,)
+    ).fetchone()
+
+
+def _update_row(
+    connection: sqlite3.Connection, table: str, identifier: int, changes: dict[str, Any]
+) -> None:
+    """Write the given columns of one row, skipping the query when empty."""
+    if not changes:
+        return
+    assignments = ", ".join(f"{column} = ?" for column in changes)
+    connection.execute(
+        f"UPDATE {table} SET {assignments} WHERE id = ?",
+        [*changes.values(), identifier],
+    )
+
+
 # --------------------------------------------------------------------------
 # Users
 # --------------------------------------------------------------------------
 
 
-def serialize_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
+def serialize_user(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "username": row["username"],
@@ -41,7 +60,7 @@ def serialize_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 def get_user_by_id(connection: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
-    return connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _row_by_id(connection, "users", user_id)
 
 
 def get_user_by_username(connection: sqlite3.Connection, username: str) -> sqlite3.Row | None:
@@ -50,9 +69,24 @@ def get_user_by_username(connection: sqlite3.Connection, username: str) -> sqlit
     ).fetchone()
 
 
+def count_users(connection: sqlite3.Connection) -> int:
+    return connection.execute("SELECT COUNT(*) AS total FROM users").fetchone()["total"]
+
+
 def list_users(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = connection.execute("SELECT * FROM users ORDER BY username").fetchall()
     return [serialize_user(row) for row in rows]
+
+
+def list_active_users(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Directory of accounts that can still sign in, for the member picker."""
+    rows = connection.execute(
+        "SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY username"
+    ).fetchall()
+    return [
+        {"id": row["id"], "username": row["username"], "full_name": row["full_name"]}
+        for row in rows
+    ]
 
 
 def create_user(
@@ -75,7 +109,7 @@ def create_user(
 
 def ensure_demo_user(connection: sqlite3.Connection) -> sqlite3.Row | None:
     """Seed the MVP demo account on an empty instance so sign-in works at once."""
-    if connection.execute("SELECT COUNT(*) AS total FROM users").fetchone()["total"]:
+    if count_users(connection):
         return None
     user = create_user(connection, "user", "password", "", "Demo User", is_admin=True)
     create_board(connection, user["id"], "My First Board", "", "kanban")
@@ -87,13 +121,13 @@ def update_user_profile(
     user_id: int,
     email: str | None,
     full_name: str | None,
-) -> sqlite3.Row | None:
+) -> sqlite3.Row:
+    changes: dict[str, Any] = {}
     if email is not None:
-        connection.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
+        changes["email"] = email
     if full_name is not None:
-        connection.execute(
-            "UPDATE users SET full_name = ? WHERE id = ?", (full_name, user_id)
-        )
+        changes["full_name"] = full_name
+    _update_row(connection, "users", user_id, changes)
     return get_user_by_id(connection, user_id)
 
 
@@ -109,15 +143,13 @@ def admin_update_user(
     user_id: int,
     is_active: bool | None,
     is_admin: bool | None,
-) -> sqlite3.Row | None:
+) -> sqlite3.Row:
+    changes: dict[str, Any] = {}
     if is_active is not None:
-        connection.execute(
-            "UPDATE users SET is_active = ? WHERE id = ?", (int(is_active), user_id)
-        )
+        changes["is_active"] = int(is_active)
     if is_admin is not None:
-        connection.execute(
-            "UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id)
-        )
+        changes["is_admin"] = int(is_admin)
+    _update_row(connection, "users", user_id, changes)
     return get_user_by_id(connection, user_id)
 
 
@@ -137,7 +169,7 @@ def get_member_role(
 
 
 def get_board(connection: sqlite3.Connection, board_id: int) -> sqlite3.Row | None:
-    return connection.execute("SELECT * FROM boards WHERE id = ?", (board_id,)).fetchone()
+    return _row_by_id(connection, "boards", board_id)
 
 
 def touch_board(connection: sqlite3.Connection, board_id: int) -> None:
@@ -222,16 +254,14 @@ def update_board(
     description: str | None,
     archived: bool | None,
 ) -> None:
+    changes: dict[str, Any] = {}
     if name is not None:
-        connection.execute("UPDATE boards SET name = ? WHERE id = ?", (name, board_id))
+        changes["name"] = name
     if description is not None:
-        connection.execute(
-            "UPDATE boards SET description = ? WHERE id = ?", (description, board_id)
-        )
+        changes["description"] = description
     if archived is not None:
-        connection.execute(
-            "UPDATE boards SET archived = ? WHERE id = ?", (int(archived), board_id)
-        )
+        changes["archived"] = int(archived)
+    _update_row(connection, "boards", board_id, changes)
     touch_board(connection, board_id)
 
 
@@ -295,9 +325,7 @@ def remove_member(connection: sqlite3.Connection, board_id: int, user_id: int) -
 
 
 def get_column(connection: sqlite3.Connection, column_id: int) -> sqlite3.Row | None:
-    return connection.execute(
-        "SELECT * FROM board_columns WHERE id = ?", (column_id,)
-    ).fetchone()
+    return _row_by_id(connection, "board_columns", column_id)
 
 
 def create_column(
@@ -322,24 +350,18 @@ def update_column(
     wip_limit: int | None,
     clear_wip_limit: bool,
 ) -> None:
+    changes: dict[str, Any] = {}
     if title is not None:
-        connection.execute(
-            "UPDATE board_columns SET title = ? WHERE id = ?", (title, column_id)
-        )
+        changes["title"] = title
     if clear_wip_limit:
-        connection.execute(
-            "UPDATE board_columns SET wip_limit = NULL WHERE id = ?", (column_id,)
-        )
+        changes["wip_limit"] = None
     elif wip_limit is not None:
-        connection.execute(
-            "UPDATE board_columns SET wip_limit = ? WHERE id = ?", (wip_limit, column_id)
-        )
+        changes["wip_limit"] = wip_limit
+    _update_row(connection, "board_columns", column_id, changes)
 
 
 def delete_column(connection: sqlite3.Connection, column_id: int) -> None:
     column = get_column(connection, column_id)
-    if column is None:
-        return
     connection.execute("DELETE FROM board_columns WHERE id = ?", (column_id,))
     normalize_column_positions(connection, column["board_id"])
 
@@ -357,8 +379,6 @@ def normalize_column_positions(connection: sqlite3.Connection, board_id: int) ->
 
 def move_column(connection: sqlite3.Connection, column_id: int, position: int) -> None:
     column = get_column(connection, column_id)
-    if column is None:
-        return
     rows = connection.execute(
         "SELECT id FROM board_columns WHERE board_id = ? ORDER BY position, id",
         (column["board_id"],),
@@ -379,7 +399,7 @@ def move_column(connection: sqlite3.Connection, column_id: int, position: int) -
 
 
 def get_label(connection: sqlite3.Connection, label_id: int) -> sqlite3.Row | None:
-    return connection.execute("SELECT * FROM labels WHERE id = ?", (label_id,)).fetchone()
+    return _row_by_id(connection, "labels", label_id)
 
 
 def create_label(
@@ -395,10 +415,12 @@ def create_label(
 def update_label(
     connection: sqlite3.Connection, label_id: int, name: str | None, color: str | None
 ) -> None:
+    changes: dict[str, Any] = {}
     if name is not None:
-        connection.execute("UPDATE labels SET name = ? WHERE id = ?", (name, label_id))
+        changes["name"] = name
     if color is not None:
-        connection.execute("UPDATE labels SET color = ? WHERE id = ?", (color, label_id))
+        changes["color"] = color
+    _update_row(connection, "labels", label_id, changes)
 
 
 def delete_label(connection: sqlite3.Connection, label_id: int) -> None:
@@ -425,7 +447,14 @@ def set_card_labels(
 
 
 def get_card(connection: sqlite3.Connection, card_id: int) -> sqlite3.Row | None:
-    return connection.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+    return _row_by_id(connection, "cards", card_id)
+
+
+def count_active_cards(connection: sqlite3.Connection, column_id: int) -> int:
+    return connection.execute(
+        "SELECT COUNT(*) AS total FROM cards WHERE column_id = ? AND archived = 0",
+        (column_id,),
+    ).fetchone()["total"]
 
 
 def create_card(
@@ -477,19 +506,11 @@ def create_card(
 def update_card(connection: sqlite3.Connection, card_id: int, changes: dict[str, Any]) -> None:
     if not changes:
         return
-    assignments = ", ".join(f"{column} = ?" for column in changes)
-    values = list(changes.values())
-    values.append(now_iso())
-    values.append(card_id)
-    connection.execute(
-        f"UPDATE cards SET {assignments}, updated_at = ? WHERE id = ?", values
-    )
+    _update_row(connection, "cards", card_id, {**changes, "updated_at": now_iso()})
 
 
 def delete_card(connection: sqlite3.Connection, card_id: int) -> None:
     card = get_card(connection, card_id)
-    if card is None:
-        return
     connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
     normalize_card_positions(connection, card["column_id"])
 
@@ -512,8 +533,6 @@ def move_card(
     connection: sqlite3.Connection, card_id: int, column_id: int, position: int
 ) -> None:
     card = get_card(connection, card_id)
-    if card is None:
-        return
     source_column_id = card["column_id"]
     connection.execute(
         "UPDATE cards SET column_id = ?, updated_at = ? WHERE id = ?",
@@ -562,9 +581,7 @@ def card_labels(connection: sqlite3.Connection, board_id: int) -> dict[int, list
 
 
 def get_checklist_item(connection: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:
-    return connection.execute(
-        "SELECT * FROM checklist_items WHERE id = ?", (item_id,)
-    ).fetchone()
+    return _row_by_id(connection, "checklist_items", item_id)
 
 
 def create_checklist_item(connection: sqlite3.Connection, card_id: int, text: str) -> int:
@@ -582,14 +599,12 @@ def create_checklist_item(connection: sqlite3.Connection, card_id: int, text: st
 def update_checklist_item(
     connection: sqlite3.Connection, item_id: int, text: str | None, done: bool | None
 ) -> None:
+    changes: dict[str, Any] = {}
     if text is not None:
-        connection.execute(
-            "UPDATE checklist_items SET text = ? WHERE id = ?", (text, item_id)
-        )
+        changes["text"] = text
     if done is not None:
-        connection.execute(
-            "UPDATE checklist_items SET done = ? WHERE id = ?", (int(done), item_id)
-        )
+        changes["done"] = int(done)
+    _update_row(connection, "checklist_items", item_id, changes)
 
 
 def delete_checklist_item(connection: sqlite3.Connection, item_id: int) -> None:
@@ -622,9 +637,7 @@ def checklists_for_board(
 
 
 def get_comment(connection: sqlite3.Connection, comment_id: int) -> sqlite3.Row | None:
-    return connection.execute(
-        "SELECT * FROM comments WHERE id = ?", (comment_id,)
-    ).fetchone()
+    return _row_by_id(connection, "comments", comment_id)
 
 
 def create_comment(
@@ -799,10 +812,8 @@ def serialize_card(
 
 def board_detail(
     connection: sqlite3.Connection, board_id: int, role: str, include_archived: bool = False
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     board = get_board(connection, board_id)
-    if board is None:
-        return None
 
     usernames = {
         row["id"]: row["username"]

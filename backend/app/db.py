@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from .security import hash_password
+
 # PM_DB_PATH lets a throwaway instance (the e2e run, for one) keep its own file.
 DB_PATH = Path(
     os.getenv("PM_DB_PATH")
@@ -161,24 +163,16 @@ def connect() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
-    rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
-    return {row["name"] for row in rows}
-
-
 def migrate_legacy_schema(connection: sqlite3.Connection) -> bool:
     """Convert the MVP schema (users + boards.board_json) to the current one.
 
     The MVP stored one board per user as a single JSON blob. Returns True when a
     migration ran, so a caller can tell a fresh database from an upgraded one.
     """
-    tables = {
-        row["name"]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
+    board_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(boards)").fetchall()
     }
-    if "boards" not in tables or "board_json" not in table_columns(connection, "boards"):
+    if "board_json" not in board_columns:
         return False
 
     legacy_users = connection.execute("SELECT * FROM users").fetchall()
@@ -190,8 +184,6 @@ def migrate_legacy_schema(connection: sqlite3.Connection) -> bool:
 
     timestamp = now_iso()
     # Legacy accounts had no stored password, so keep the MVP demo password.
-    from .security import hash_password
-
     demo_hash = hash_password("password")
     user_ids: dict[int, int] = {}
     for row in legacy_users:

@@ -15,7 +15,7 @@ export const parseDragId = (
   return { kind, id: value };
 };
 
-export const cardMap = (board: Board): Map<number, Card> =>
+const cardMap = (board: Board): Map<number, Card> =>
   new Map(board.cards.map((card) => [card.id, card]));
 
 export const cardsInColumn = (board: Board, columnId: number): Card[] => {
@@ -54,29 +54,26 @@ export const resolveDrop = (
     return null;
   }
 
-  const source = columnOfCard(board, active.id);
-  if (!source) {
+  // The dragged card has to be on the board, and the drop has to land on one
+  // of its columns, either directly or through the card dropped on.
+  if (!columnOfCard(board, active.id)) {
+    return null;
+  }
+  const target =
+    over.kind === "column"
+      ? board.columns.find((column) => column.id === over.id)
+      : columnOfCard(board, over.id);
+  if (!target) {
     return null;
   }
 
-  const targetColumnId =
-    over.kind === "column" ? over.id : columnOfCard(board, over.id)?.id;
-  if (targetColumnId === undefined) {
-    return null;
-  }
+  // Dropping on the column itself appends, as does a card that has gone.
+  const others = target.card_ids.filter((id) => id !== active.id);
+  const index = over.kind === "column" ? -1 : others.indexOf(over.id);
 
-  const others = board.columns
-    .find((column) => column.id === targetColumnId)!
-    .card_ids.filter((id) => id !== active.id);
-
-  if (over.kind === "column") {
-    return { cardId: active.id, columnId: targetColumnId, position: others.length };
-  }
-
-  const index = others.indexOf(over.id);
   return {
     cardId: active.id,
-    columnId: targetColumnId,
+    columnId: target.id,
     position: index === -1 ? others.length : index,
   };
 };
@@ -208,9 +205,6 @@ export const isOverdue = (card: Card, today = new Date()): boolean => {
 export const isOverWipLimit = (column: Column): boolean =>
   column.wip_limit !== null && column.card_ids.length > column.wip_limit;
 
-export const isAtWipLimit = (column: Column): boolean =>
-  column.wip_limit !== null && column.card_ids.length >= column.wip_limit;
-
 export const canEdit = (board: Pick<Board, "role">): boolean =>
   board.role === "owner" || board.role === "editor";
 
@@ -229,11 +223,4 @@ export const formatDate = (value: string | null): string => {
     day: "numeric",
     year: "numeric",
   });
-};
-
-export const priorityRank: Record<Priority, number> = {
-  urgent: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
 };

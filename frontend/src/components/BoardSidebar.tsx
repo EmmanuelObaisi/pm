@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import * as api from "@/lib/api";
 import { formatDate } from "@/lib/board";
+import { errorMessage } from "@/lib/errors";
 import type { ActivityEntry, Board, Card, Member } from "@/lib/types";
 import { Badge, Button, ErrorText, Input, Spinner } from "@/components/ui";
 
@@ -32,7 +33,7 @@ export const BoardSidebar = ({
 }) => {
   const [tab, setTab] = useState<Tab>("stats");
   // Member mutations return the fresh list, which then wins over the board's copy.
-  const [memberEdits, setMembers] = useState<Member[] | null>(null);
+  const [memberEdits, setMemberEdits] = useState<Member[] | null>(null);
   const members = memberEdits ?? board.members;
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   const [archived, setArchived] = useState<Card[] | null>(null);
@@ -73,22 +74,29 @@ export const BoardSidebar = ({
     };
   }, [tab, board.id, board.updated_at]);
 
-  const report = (caught: unknown, fallback: string) =>
-    setError(caught instanceof Error ? caught.message : fallback);
+  /** Every mutation here reports its own failure and leaves the panel as it was. */
+  const run = async (fallback: string, action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch (caught) {
+      setError(errorMessage(caught, fallback));
+    }
+  };
 
-  const addMember = async (event: React.FormEvent) => {
+  const addMember = (event: React.FormEvent) => {
     event.preventDefault();
     if (!memberName.trim()) {
       return;
     }
-    try {
-      setMembers(await api.addMember(board.id, memberName.trim(), memberRole));
+    void run("Could not add that member", async () => {
+      setMemberEdits(await api.addMember(board.id, memberName.trim(), memberRole));
       setMemberName("");
       setError("");
-    } catch (caught) {
-      report(caught, "Could not add that member");
-    }
+    });
   };
+
+  const dropArchived = (cardId: number) =>
+    setArchived((current) => current?.filter((card) => card.id !== cardId) ?? null);
 
   const columnName = (columnId: string) =>
     board.columns.find((column) => String(column.id) === columnId)?.title ?? "Unknown";
@@ -190,18 +198,13 @@ export const BoardSidebar = ({
                       <select
                         value={member.role}
                         aria-label={`Role for ${member.username}`}
-                        onChange={async (event) => {
-                          try {
-                            setMembers(
-                              await api.updateMember(
-                                board.id,
-                                member.user_id,
-                                event.target.value as "editor" | "viewer"
-                              )
+                        onChange={(event) => {
+                          const role = event.target.value as "editor" | "viewer";
+                          void run("Could not change that role", async () => {
+                            setMemberEdits(
+                              await api.updateMember(board.id, member.user_id, role)
                             );
-                          } catch (caught) {
-                            report(caught, "Could not change that role");
-                          }
+                          });
                         }}
                         className="rounded-lg border border-[var(--stroke)] px-2 py-1 text-xs"
                       >
@@ -212,13 +215,13 @@ export const BoardSidebar = ({
                         variant="ghost"
                         size="sm"
                         aria-label={`Remove ${member.username}`}
-                        onClick={async () => {
-                          try {
-                            setMembers(await api.removeMember(board.id, member.user_id));
-                          } catch (caught) {
-                            report(caught, "Could not remove that member");
-                          }
-                        }}
+                        onClick={() =>
+                          run("Could not remove that member", async () => {
+                            setMemberEdits(
+                              await api.removeMember(board.id, member.user_id)
+                            );
+                          })
+                        }
                       >
                         Remove
                       </Button>
@@ -268,13 +271,11 @@ export const BoardSidebar = ({
                     size="sm"
                     className="ml-auto"
                     aria-label={`Delete label ${label.name}`}
-                    onClick={async () => {
-                      try {
+                    onClick={() =>
+                      run("Could not delete that label", async () => {
                         onBoardChange(await api.deleteLabel(board.id, label.id));
-                      } catch (caught) {
-                        report(caught, "Could not delete that label");
-                      }
-                    }}
+                      })
+                    }
                   >
                     Delete
                   </Button>
@@ -283,19 +284,17 @@ export const BoardSidebar = ({
             </ul>
 
             <form
-              onSubmit={async (event) => {
+              onSubmit={(event) => {
                 event.preventDefault();
                 if (!labelName.trim()) {
                   return;
                 }
-                try {
+                void run("Could not create that label", async () => {
                   onBoardChange(
                     await api.createLabel(board.id, labelName.trim(), labelColor)
                   );
                   setLabelName("");
-                } catch (caught) {
-                  report(caught, "Could not create that label");
-                }
+                });
               }}
               className="flex gap-2"
             >
@@ -338,18 +337,14 @@ export const BoardSidebar = ({
                         variant="ghost"
                         size="sm"
                         aria-label={`Restore ${card.title}`}
-                        onClick={async () => {
-                          try {
+                        onClick={() =>
+                          run("Could not restore that card", async () => {
                             onBoardChange(
                               await api.updateCard(card.id, { archived: false })
                             );
-                            setArchived(
-                              archived.filter((item) => item.id !== card.id)
-                            );
-                          } catch (caught) {
-                            report(caught, "Could not restore that card");
-                          }
-                        }}
+                            dropArchived(card.id);
+                          })
+                        }
                       >
                         Restore
                       </Button>
@@ -357,16 +352,12 @@ export const BoardSidebar = ({
                         variant="ghost"
                         size="sm"
                         aria-label={`Delete ${card.title}`}
-                        onClick={async () => {
-                          try {
+                        onClick={() =>
+                          run("Could not delete that card", async () => {
                             onBoardChange(await api.deleteCard(card.id));
-                            setArchived(
-                              archived.filter((item) => item.id !== card.id)
-                            );
-                          } catch (caught) {
-                            report(caught, "Could not delete that card");
-                          }
-                        }}
+                            dropArchived(card.id);
+                          })
+                        }
                       >
                         Delete
                       </Button>

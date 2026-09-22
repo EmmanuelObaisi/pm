@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import * as api from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import type { User } from "@/lib/types";
 import { Button, ErrorText, Field, Input, Spinner } from "@/components/ui";
 
@@ -27,7 +28,7 @@ const Profile = ({
       setStatus("Profile saved");
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save the profile");
+      setError(errorMessage(caught, "Could not save the profile"));
     }
   };
 
@@ -40,7 +41,7 @@ const Profile = ({
       setStatus("Password changed");
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not change the password");
+      setError(errorMessage(caught, "Could not change the password"));
     }
   };
 
@@ -100,7 +101,7 @@ const Admin = ({ currentUser }: { currentUser: User }) => {
       .fetchAdminUsers()
       .then(setUsers)
       .catch((caught) => {
-        setError(caught instanceof Error ? caught.message : "Could not load users");
+        setError(errorMessage(caught, "Could not load users"));
         setUsers([]);
       });
   }, []);
@@ -113,7 +114,7 @@ const Admin = ({ currentUser }: { currentUser: User }) => {
       );
       setError("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update that user");
+      setError(errorMessage(caught, "Could not update that user"));
     }
   };
 

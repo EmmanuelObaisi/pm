@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import * as api from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import type { Session } from "@/lib/types";
 import { Button, ErrorText, Field, Input } from "@/components/ui";
 
@@ -33,7 +34,7 @@ export const AuthScreen = ({ onSignedIn }: { onSignedIn: (session: Session) => v
             });
       onSignedIn(session);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Something went wrong");
+      setError(errorMessage(caught, "Something went wrong"));
     } finally {
       setBusy(false);
     }
@@ -43,6 +44,11 @@ export const AuthScreen = ({ onSignedIn }: { onSignedIn: (session: Session) => v
     setMode(mode === "login" ? "register" : "login");
     setError("");
   };
+
+  let submitLabel = mode === "login" ? "Sign in" : "Create account";
+  if (busy) {
+    submitLabel = "Working...";
+  }
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--surface)] p-6">
@@ -101,7 +107,7 @@ export const AuthScreen = ({ onSignedIn }: { onSignedIn: (session: Session) => v
           <ErrorText>{error}</ErrorText>
 
           <Button type="submit" disabled={busy}>
-            {busy ? "Working..." : mode === "login" ? "Sign in" : "Create account"}
+            {submitLabel}
           </Button>
         </form>
 
